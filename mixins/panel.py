@@ -312,6 +312,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
             # 回流通道——写作中点亮按钮禁用态；last_result={ts,written,reason}
             # 是队列成文的成败结论，面板按 ts 去重弹一次 toast（内存即弃）
             "review_brief": {
+                "last_ts": str(shard.review[-1].get("ts") or "") if shard.review else "",
                 "enabled": self._review_enabled(shard),
                 "entries": len(shard.review),
                 "progress_turns": int(shard.review_stats.get("turns") or 0),

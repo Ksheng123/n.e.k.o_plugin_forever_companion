@@ -565,6 +565,7 @@ class WhisperMixin:
             f"{next_page_no(shard.journal)} 页）。{material}"
             "如果你愿意，可以调用 mood_journal_write 工具写一篇日记——"
             "按「这段时间/我在想/对他的感觉」几个栏目，用你自己的话写连贯的几段。"
+            "新页也请在 title 里为这页日记起一个贴合内容的短标题。"
             "不想写也完全没关系，由你自己决定。"
         )
         if deliver == "respond":

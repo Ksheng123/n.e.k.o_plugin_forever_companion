@@ -31,7 +31,7 @@ from ..core.review import (
     append_review,
     build_review_prompt,
     can_force_write,
-    parse_review_response,
+    parse_review_document,
     record_action,
     record_fragment,
     record_tone,
@@ -752,7 +752,8 @@ class SensesMixin:
             call_type="plugin_review_compose",
         )
         self._channel_break_note(lanlan, "review", route, ok=raw is not None)
-        text = parse_review_response(raw or "")
+        document = parse_review_document(raw or "")
+        text = str(document.get("text") or "")
         if not text:
             # 留痕分级（1.2.2 审查轮）：面板提示"稍后再试（详见插件日志）"，
             # 过去这条路径完全静默（请求失败也只有 debug 级）——让用户查无可查。
@@ -782,7 +783,9 @@ class SensesMixin:
             self.logger.warning("review compose failed for {}: {}", lanlan, detail)
             return False, "compose_failed"
         stats_snapshot = dict(shard.review_stats)
-        record = review_record(_now_utc().isoformat(timespec="seconds"), stats_snapshot, text)
+        record = review_record(
+            _now_utc().isoformat(timespec="seconds"), stats_snapshot, text, title=document.get("title") or "",
+        )
         # 写入前快照：落盘失败要整体回滚——过去"先追加内存+清零素材、再写
         # （且不检查结果）"，真失败（磁盘满/DB 锁）会让这一篇与整段素材永久丢失，
         # 面板却显示成功。1.3.0 档案室：回滚范围含 archive——篇目/素材/卷宗档

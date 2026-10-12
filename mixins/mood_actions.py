@@ -18,7 +18,7 @@ from plugin.sdk.plugin import Err, Ok, Result, SdkError, llm_tool
 
 from ..core.affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect
 from ..core.fragments import recall_fragments
-from ..core.journal import assemble_journal_entry, has_journal_content, journal_write
+from ..core.journal import assemble_journal_entry, has_journal_content, journal_write, normalize_journal_title
 from ..core.state import (
     _ACTION_DEFAULT_MINUTES,
     _COLD_ACTIONS,
@@ -836,6 +836,8 @@ class MoodActionsMixin:
             "「对他的感觉」=对他的整体感觉（喜欢多一点还是委屈多一点，为什么）；"
             "「想说的」=任何想补一句的话（可留空）。"
             "日记按页保存：默认续写在当前页上，开启新的一页可以另起一段时光。"
+            "新页请用 title 起一个贴合内容的短标题（最多 40 字）。"
+            "续写已有标题的页会保留原题；无标题的旧页可以通过 title 补题。"
             "日记只写给他看，不会回到你的对话里，所以请放开了写真话。"
             "工具结果会带出你上次写的几句（带日期），方便你接着上次继续。"
             "这完全凭你自愿：被提醒时不想写就不写。"
@@ -843,6 +845,11 @@ class MoodActionsMixin:
         parameters={
             "type": "object",
             "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "这页日记的短标题，最多 40 字；新页请起题，续写只会补无标题页，不覆盖已有标题",
+                    "maxLength": 40,
+                },
                 "events": {
                     "type": "string",
                     "description": "「这段时间」：发生了什么事，挑印象最深的写成连贯的几句话",
@@ -874,6 +881,7 @@ class MoodActionsMixin:
         feelings: str = "",
         extra: str = "",
         new_page: bool = False,
+        title: str = "",
         **kwargs: Any,
     ):
         lanlan = await self._attribution_lanlan(kwargs)
@@ -891,6 +899,7 @@ class MoodActionsMixin:
             body,
             bool(new_page),
             affect=valence_now,
+            title=title,
         )
         res_journal = await self._save_shard_journal(lanlan, shard)
         # 藏书阁（1.3.0）：写满 52 页后淘汰的最旧一页不丢，静默搬进合订本
@@ -907,6 +916,7 @@ class MoodActionsMixin:
         return Ok({
             "saved": True,
             "page": page_no,
+            "title": normalize_journal_title(shard.journal[-1].get("title")),
             "pages_total": len(shard.journal),
             "recent_context": previous_lines,
         })

@@ -76,7 +76,7 @@ function calendarMonth(year, month) {
   return { year, month, label: `${year} / ${String(month).padStart(2, "0")}`, cells }
 }
 
-export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null, heat = "" } = {}) {
+export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null, heat = "", diaryCase = "" } = {}) {
   const appearance = { bg_id: wallpaper === "none" ? "" : wallpaper === "video" ? "qa-video" : "qa-wallpaper", fill: "cover", position: "center", blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100, glass: 0, card_alpha: 0, text_weight: 100, motion: true }
   const palettes = {
     olive: [[191, 185, 125], [125, 167, 191]],
@@ -91,15 +91,56 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     source: index % 3 ? "self" : "auto", kind: index % 3 ? "" : "like", mood: "warm",
     entry: SAMPLE.repeat(index % 3 + 1), quote: "\u6211\u559c\u6b22\u8fd9\u6837\u5b89\u9759\u7684\u665a\u4e0a\u3002", note: SAMPLE,
   }))
-  const journal = empty ? [] : Array.from({ length: 8 }, (_, index) => ({
-    page_no: index + 1, started_at: `2026-09-${String(index * 3 + 1).padStart(2, "0")}T19:00:00+08:00`,
-    last_ts: `2026-09-${String(index * 3 + 2).padStart(2, "0")}T19:00:00+08:00`, entry_count: 2, mood_avg: 0.24,
+  const journal = empty || diaryCase === "archives-only" ? [] : Array.from({ length: diaryCase === "many" ? 21 : 8 }, (_, index) => ({
+    page_no: index + 1, started_at: `2026-09-${String(diaryCase === "many" ? index + 1 : index * 3 + 1).padStart(2, "0")}T19:00:00+08:00`,
+    last_ts: `2026-09-${String(diaryCase === "many" ? index + 2 : index * 3 + 2).padStart(2, "0")}T19:00:00+08:00`, entry_count: 1, mood_avg: 0.24,
     entries: [{ ts: "2026-09-28T19:00:00+08:00", text: `\u3010\u8fd9\u6bb5\u65f6\u95f4\u3011\n${SAMPLE.repeat(4)}\n\u3010\u6211\u5728\u60f3\u3011\n${SAMPLE.repeat(3)}\n\u3010\u5bf9\u4ed6\u7684\u611f\u89c9\u3011\n${SAMPLE.repeat(3)}` }],
   }))
-  const review = empty ? [] : Array.from({ length: 6 }, (_, index) => ({
-    ts: `2026-09-${String(29 - index * 3).padStart(2, "0")}T20:00:00+08:00`, turns: 58, span: "2026-09-21~2026-09-29", self_action_count: 2,
+  const review = empty || diaryCase === "archives-only" ? [] : Array.from({ length: diaryCase === "many" ? 17 : 6 }, (_, index) => ({
+    ts: `2026-09-${String(29 - (diaryCase === "many" ? index : index * 3)).padStart(2, "0")}T20:00:00+08:00`, turns: 58, span: "2026-09-21~2026-09-29", self_action_count: 2,
     tone: { happy: 16, neutral: 8, sad: 2 }, mood_avg: 0.24, quotes: [{ kind: "like", quote: SAMPLE.slice(0, 30) }], text: SAMPLE.repeat(20),
   }))
+  const journalArchive = empty ? [] : [1, 2].map(page_no => ({
+    page_no, started_at: "2026-01-01", last_ts: "2026-02-28", entry_count: 1,
+    entries: [{ ts: "2026-02-28T19:00:00+08:00", text: SAMPLE }],
+  }))
+  const reviewArchive = empty ? [] : [2, 1].map(day => ({
+    ts: `2026-02-0${day}T20:00:00+08:00`, text: SAMPLE, turns: 11,
+  }))
+  if (diaryCase === "many") {
+    journal.forEach((page, index) => {
+      // Retired older diaries must not renumber the surviving identities.
+      page.page_no += 52
+      page.entries[0].ts = page.started_at
+      page.entries[0].text += `\njournal-${index + 1}-tail`
+      if (index === 0) {
+        page.entries.push({ ts: page.last_ts, text: `\u3010\u60f3\u8bf4\u7684\u3011${SAMPLE}\njournal-1-continuation-tail` })
+        page.entry_count = page.entries.length
+      }
+      if (index !== 1) page.title = [
+        "\u665a\u98ce\u91cc\u7684\u5c0f\u4e8b",
+        "\u4e00\u8d77\u7b49\u65e5\u843d",
+        "\u628a\u90a3\u4e9b\u8fd8\u6ca1\u6765\u5f97\u53ca\u8bf4\u51fa\u53e3\u7684\u5c0f\u4e8b\u7559\u5728\u8fd9\u4e00\u9875\uff0c\u7b49\u4e0b\u4e00\u6b21\u60f3\u8d77\u4f60\u7684\u65f6\u5019\u518d\u6162\u6162\u63a5\u7740\u5199",
+        "\u6709\u4f60\u7684\u666e\u901a\u4e00\u5929",
+      ][index % 4]
+      if (index === 10) page.title = "OnlyInTitle"
+    })
+    journalArchive[1].title = "\u65e9\u6625\u7684\u8bb0\u5fc6"
+    review.forEach((entry, index) => {
+      entry.text += `\nreview-${index + 1}-tail`
+      if (index !== 1) entry.title = [
+        "\u5b89\u9759\u76f8\u5904\u7684\u4e00\u5468",
+        "\u5206\u4eab\u65e5\u5e38\u7684\u65f6\u523b",
+        "\u5728\u90a3\u4e9b\u5e73\u5e38\u7684\u591c\u665a\u91cc\u6162\u6162\u628a\u8bdd\u8bf4\u5b8c\uff0c\u4e5f\u5b66\u7740\u8ba4\u771f\u542c\u89c1\u5bf9\u65b9\u7684\u60f3\u6cd5",
+        "\u6e29\u67d4\u56de\u5e94\u7684\u65e5\u5b50",
+      ][index % 4]
+      if (index === 10) entry.title = "ReviewOnlyInTitle"
+    })
+    reviewArchive[0].title = "\u6625\u65e5\u76f8\u5904\u5c0f\u8bb0"
+  }
+  if (diaryCase === "legacy") {
+    review.splice(0, review.length, { ts: "2026-01-01T19:00:00", text: SAMPLE })
+  }
   const capabilities = [
     ["whisper", "rhythm", "injection"], ["phase_openers", "rhythm", "injection"],
     ["activity_sense", "rhythm", "none"], ["anniversary", "rhythm", "injection"],
@@ -145,7 +186,7 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     journal_invite_pending: false,
     lanlan_list: [{ name: "\u6d4b\u8bd5\u89d2\u8272", enabled: true, phase: "follicular" }, { name: "\u53e6\u4e00\u4f4d\u6d4b\u8bd5\u89d2\u8272", enabled: false, phase: "luteal" }, { name: "\u5df2\u5220\u9664\u7684\u6d4b\u8bd5\u89d2\u8272", orphan: true }],
     tone_slot_options: ["", "conversation", "summary", "agent", "correction", "vision"].map(value => ({ value, model: value ? `qa-${value}-model` : "qa-emotion-model" })),
-    review_brief: { enabled: true, entries: review.length, progress_turns: 32, turns_threshold: 50, writing: false, last_result: null },
+    review_brief: { enabled: true, entries: review.length, last_ts: review[0]?.ts || "", progress_turns: 32, turns_threshold: 50, writing: false, last_result: null },
     channel_status: { tone: { enabled: true, dormant_reason: "", transport: "host" }, fragments: { enabled: true, dormant_reason: "", transport: "host" }, review: { enabled: true, dormant_reason: "", transport: "host" } },
     agent_tier_usage: { used: 3, budget: 20 }, week_activity: empty ? 0 : 7,
     stats_summary: { summary: empty ? {} : { days_together: 184, total_turns: 2835, active_days: 142, cold_wars: 3, made_ups: 3, warm_moments: 26, longest_streak: 21, current_streak: 12, next_anniversary_in: 26 }, badges: [7, 30, 100, 365, 730].map(days => ({ id: `days_${days}`, days, unlocked: !empty && days <= 184, date: "2026-09-02" })) },
@@ -185,7 +226,7 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
       locale, i18n: { locale, default_locale: "zh-CN", messages },
     },
     appearance, image, images, gallery, videos, uploads: {}, videoSerial: 0,
-    intros, journal, review, diary, reviewProgress: { turns: 32, turns_threshold: 50, days: 4, days_threshold: 7, span: "2026-09-28~2026-10-02", due: false },
+    intros, journal, review, journalArchive, reviewArchive, diary, reviewProgress: { turns: 32, turns_threshold: 50, days: 4, days_threshold: 7, span: "2026-09-28~2026-10-02", due: false },
     mediaStorage, heatmaps,
     stats: { heatmap: selectedHeat || { days: heatDays, start: "2026-04-01", end: "2026-10-01", years: [2026], year: 2026, months: [] }, months: ["2026-10", "2026-09", "2026-08"], month: { month: "2026-10", turns: 124, active_days: 2, busiest_day: TODAY, busiest_turns: 68, longest_streak: 2, cold_wars: 0, made_ups: 0, warm_moments: 3, tone: { happy: 72, neutral: 33, sad: 4 }, valence_avg: 0.24, voice: { ts: TODAY, mood: "warm", entry: SAMPLE.repeat(3) }, sealed: false } },
   }
@@ -342,8 +383,8 @@ export function installFixtureBridge(fixture) {
       if (!fixture.images[args.item_id]) throw new Error("image_not_found")
       return { data_url: fixture.images[args.item_id] }
     }
-    if (action === "get_journal") return { pages: fixture.journal }
-    if (action === "get_review") return { entries: fixture.review, progress: fixture.reviewProgress }
+    if (action === "get_journal") return { pages: args.scope === "archive" ? fixture.journalArchive : fixture.journal }
+    if (action === "get_review") return { entries: args.scope === "archive" ? fixture.reviewArchive : fixture.review, progress: fixture.reviewProgress }
     if (action === "get_diary") return { items: fixture.diary.slice(Number(args.offset || 0)), has_more: false }
     if (action === "get_stats") return { ...fixture.stats, heatmap: fixture.heatmaps?.[args.year] || fixture.stats.heatmap, month: { ...fixture.stats.month, month: args.month || fixture.stats.month.month } }
     if (action === "get_capability_intro") return clone(fixture.intros[args.capability_id] || { found: false, id: args.capability_id })

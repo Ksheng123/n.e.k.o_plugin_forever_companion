@@ -25,6 +25,8 @@ from .state import (
 
 JsonObject = dict[str, Any]
 
+_JOURNAL_TITLE_MAX_CHARS = 40
+
 # 结构化写作字段的截断上限（拼装前的单字段限制；总长仍受 _JOURNAL_ENTRY_MAX_CHARS 约束）
 _JOURNAL_FIELD_MAX = {
     "events": 300,    # 这段时间发生了什么
@@ -79,6 +81,11 @@ def next_page_no(pages: list[JsonObject]) -> int:
     return (int(pages[-1].get("page_no") or 0) + 1) if pages else 1
 
 
+def normalize_journal_title(title: Any) -> str:
+    """页标题只接受单行短文本；旧数据缺字段时保持无标题。"""
+    return " ".join(title.split())[:_JOURNAL_TITLE_MAX_CHARS] if isinstance(title, str) else ""
+
+
 def journal_write(
     pages: list[JsonObject],
     text: str,
@@ -86,6 +93,7 @@ def journal_write(
     *,
     now: datetime | None = None,
     affect: float | None = None,
+    title: str = "",
 ) -> tuple[list[JsonObject], int, str, list[JsonObject]]:
     """写一篇日记（纯函数）：续写当前页或翻新页，返回 (新页列表, 页码, 续写衔接句, 被淘汰页)。
 
@@ -93,6 +101,7 @@ def journal_write(
     - 续写衔接句（previous_lines）= 写入前目标页最后两段的正文（换行拼接，各截 160 字），
       翻新页时回落到上一页最后一段——供工具结果带回，让她自然接上上次写到哪；
       空日记本返回空串；
+    - title 为整页标题，最多 40 字；新页可起题，续写仅补无标题的页；
     - 页数超上限时淘汰最旧一页（约一年的周更体量，见 _JOURNAL_MAX_PAGES）；
       被淘汰页随返回值带出（evicted，时间正序），由调用方 append 进藏书阁
       （journal_archive@，1.3.0）——淘汰不再是静默的丢，而是静默的搬家。
@@ -124,6 +133,10 @@ def journal_write(
     else:
         entries = new_pages[-1].get("entries")
         tail = "\n".join(_tail_line(item) for item in entries[-2:])
+    heading = normalize_journal_title(title)
+    # 标题属于整页：续写只补无标题页，不覆盖角色已经起好的标题。
+    if heading and not normalize_journal_title(new_pages[-1].get("title")):
+        new_pages[-1]["title"] = heading
     entry: JsonObject = {"ts": now_iso, "text": body}
     if affect is not None:
         entry["affect"] = round(float(affect), 2)
@@ -250,7 +263,7 @@ def fabricate_demo_pages(count: int = _JOURNAL_MAX_PAGES, *, now: datetime | Non
 
 
 def page_header(page: JsonObject) -> JsonObject:
-    """页眉数据（纯函数）：页码/起止时间/段数/心情走向均值（正文无 affect 快照时为 None）。"""
+    """页眉数据：标题/页码/起止时间/段数/心情均值；缺标题的旧页返回空标题。"""
     entries = page.get("entries") if isinstance(page, dict) else None
     entries = entries if isinstance(entries, list) else []
     affects = [
@@ -261,6 +274,7 @@ def page_header(page: JsonObject) -> JsonObject:
     last_ts = str(entries[-1].get("ts") or "") if entries else ""
     return {
         "page_no": int(page.get("page_no") or 0),
+        "title": normalize_journal_title(page.get("title")),
         "started_at": str(page.get("started_at") or ""),
         "last_ts": last_ts,
         "entry_count": len(entries),

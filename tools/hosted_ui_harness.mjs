@@ -14,6 +14,7 @@ import { appearanceChecks, expandAppearance } from "./hosted_ui_appearance_check
 import { videoChecks } from "./hosted_ui_video_checks.mjs"
 import { directChecks } from "./hosted_ui_direct_checks.mjs"
 import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
+import { diaryChecks } from "./hosted_ui_diary_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -863,7 +864,7 @@ async function inspectFooterGeometry(frame) {
       clearance: getComputedStyle(content).getPropertyValue("--tm-save-clearance"),
       expectedClearance: `${Math.ceil(save.getBoundingClientRect().height + (parseFloat(getComputedStyle(content).paddingBottom) || 0))}px`,
       ancestors,
-      items: [...foot.querySelectorAll(".tmb-btn,.tmb-ind,.tmb-leaf-ind")].map(element => ({ ...rect(element), text: element.textContent })).filter(item => item.width && item.height),
+      items: [...foot.querySelectorAll(".tmb-btn,.tmb-ind,.tmb-current-diary")].filter(element => !element.closest(".tmb-current-diary") || element.matches(".tmb-current-diary")).map(element => ({ ...rect(element), text: element.textContent, button: element.matches(".tmb-btn"), overflowX: element.scrollWidth - element.clientWidth })).filter(item => item.width && item.height),
       buttons: [...foot.querySelectorAll("button:not(:disabled)")].map(element => {
         const bounds = rect(element)
         const atCenter = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)
@@ -902,6 +903,32 @@ async function compactAndFooterChecks(browser, origin, output) {
         await loaded.page.screenshot({ path: join(output, `390x600-${locale}-savebar.png`), animations: "disabled" })
         return geometry
       })
+      await check(`journal-navigation-labels-fit-${locale}-390x600`, async () => {
+        const text = await loaded.page.evaluate(language => window.qaFixture.context.i18n.messages[language], locale)
+        await loaded.frame.locator(".tm-tab").nth(TABS.indexOf("diary")).click()
+        await loaded.frame.getByRole("button", { name: text["panel.journal.tabJournal"], exact: true }).click()
+        await loaded.frame.locator(".tmb-spine:not(.tmb-spine--file)").first().click()
+        await loaded.frame.waitForSelector(".tmb-current-diary")
+        const geometry = await inspectFooterGeometry(loaded.frame)
+        for (const item of geometry.items) {
+          assert(item.left >= geometry.foot.left - 1 && item.right <= geometry.foot.right + 1, JSON.stringify(item))
+          assert(item.top >= geometry.foot.top - 1 && item.bottom <= geometry.foot.bottom + 1, JSON.stringify(item))
+          if (item.button) assert(item.overflowX <= 1, `Navigation text is clipped: ${JSON.stringify(item)}`)
+        }
+        for (let i = 0; i < geometry.items.length; i += 1) for (let j = i + 1; j < geometry.items.length; j += 1) {
+          const a = geometry.items[i]
+          const b = geometry.items[j]
+          assert(Math.min(a.right, b.right) - Math.max(a.left, b.left) <= 1 || Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) <= 1, JSON.stringify([a, b]))
+        }
+        for (const button of geometry.buttons) assert(button.hit, JSON.stringify(button))
+        const navigation = geometry.items.slice(1)
+        const centers = navigation.map(item => (item.top + item.bottom) / 2)
+        assert(Math.max(...centers) - Math.min(...centers) <= 1, `Navigation wrapped: ${JSON.stringify(navigation)}`)
+        assert.equal(await loaded.frame.locator(".tmb-foot .tmb-ind").innerText(), text["panel.journal.diaryNo"].replace("{n}", "1"))
+        assert.equal(await loaded.frame.locator(".tmb-foot .tmb-btn").last().innerText(), text["panel.journal.nextDiary"])
+        await loaded.page.screenshot({ path: join(output, `390x600-${locale}-journal-navigation.png`), animations: "disabled" })
+        return geometry
+      })
       await check(`review-seal-label-fits-${locale}-390x600`, async () => {
         await loaded.frame.locator(".tm-tab").nth(TABS.indexOf("diary")).click()
         const label = await loaded.page.evaluate(language => window.qaFixture.context.i18n.messages[language]["panel.review.tabReview"], locale)
@@ -924,6 +951,16 @@ async function compactAndFooterChecks(browser, origin, output) {
         for (const rect of geometry.fragments) {
           assert(rect.left >= geometry.box.left - 1 && rect.right <= geometry.box.right + 1 && rect.top >= geometry.box.top - 1 && rect.bottom <= geometry.box.bottom + 1, JSON.stringify(geometry))
         }
+        const footer = await inspectFooterGeometry(loaded.frame)
+        for (const item of footer.items) {
+          assert(item.left >= footer.foot.left - 1 && item.right <= footer.foot.right + 1, JSON.stringify(item))
+          if (item.button) assert(item.overflowX <= 1, `Review navigation text is clipped: ${JSON.stringify(item)}`)
+        }
+        const centers = footer.items.slice(1).map(item => (item.top + item.bottom) / 2)
+        assert(Math.max(...centers) - Math.min(...centers) <= 1, `Review navigation wrapped: ${JSON.stringify(footer.items)}`)
+        assert.equal(await loaded.frame.locator(".tmb-current-title").innerText(), await loaded.frame.locator(".tmb-reading-title").innerText())
+        const composedAt = await loaded.page.evaluate(() => window.qaFixture.review[0].ts.replace("T", " ").slice(0, 16))
+        assert.equal(await loaded.frame.locator(".tmb-foot .tmb-ind").innerText(), composedAt)
         await loaded.frame.locator(".tmb-seal").evaluate(element => element.scrollIntoView({ block: "center" }))
         await loaded.page.screenshot({ path: join(output, `390x600-${locale}-review-seal.png`), animations: "disabled" })
         return geometry
@@ -959,7 +996,10 @@ async function compactAndFooterChecks(browser, origin, output) {
             assert(geometry.foot.top >= geometry.content.top - 1 && geometry.foot.bottom <= height + 1, `Footer is outside visible content: ${JSON.stringify(geometry)}`)
             const card = geometry.ancestors.find(item => item.className.includes("neko-card") && item.className.includes("tmb-card"))
             assert(card && card.overflowX === "visible" && card.overflowY === "visible", `Book card retains a scroll container: ${JSON.stringify(geometry.ancestors)}`)
-            for (const item of geometry.items) assert(item.left >= geometry.content.left - 1 && item.right <= width + 1, `Footer item is outside horizontal bounds: ${JSON.stringify(item)}`)
+            for (const item of geometry.items) {
+              assert(item.left >= geometry.content.left - 1 && item.right <= width + 1, `Footer item is outside horizontal bounds: ${JSON.stringify(item)}`)
+              if (item.button) assert(item.overflowX <= 1, `Footer text is clipped: ${JSON.stringify(item)}`)
+            }
             for (let i = 0; i < geometry.items.length; i += 1) for (let j = i + 1; j < geometry.items.length; j += 1) {
               const a = geometry.items[i]
               const b = geometry.items[j]
@@ -968,6 +1008,9 @@ async function compactAndFooterChecks(browser, origin, output) {
               assert(x <= 1 || y <= 1, `Footer items overlap at ${scroll}: ${JSON.stringify([a, b])}`)
             }
             for (const button of geometry.buttons) assert(button.hit, `Footer control is covered at ${scroll}: ${JSON.stringify(button)}`)
+            const navigation = geometry.items.slice(1)
+            const centers = navigation.map(item => (item.top + item.bottom) / 2)
+            assert(Math.max(...centers) - Math.min(...centers) <= 1, `Navigation wrapped at ${scroll}: ${JSON.stringify(navigation)}`)
             measurements.push({ scroll, ...geometry })
           }
           await loaded.page.screenshot({ path: join(output, `${width}x${height}-${theme}-${kind}-footer.png`), animations: "disabled" })
@@ -1344,7 +1387,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1389,6 +1432,11 @@ async function main() {
         const heatmap = await heatmapChecks(browser, sources, origin, output, { loadPage, inspectLayout })
         report.screenshots.push(...heatmap.screenshots)
         report.interactions.push(...heatmap.checks)
+      }
+      if (process.argv.includes("--diary") || process.argv.includes("--diary-only")) {
+        const diary = await diaryChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...diary.screenshots)
+        report.interactions.push(...diary.checks)
       }
     } finally {
       if (browser) await browser.close()

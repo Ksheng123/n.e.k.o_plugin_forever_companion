@@ -74,6 +74,7 @@ export type DiaryItem = {
 // 个人日记页眉统计（journal_index 用）；entries 仅 journal_current / get_journal 返回
 export type JournalPageHeader = {
   page_no?: number
+  title?: string
   started_at?: string
   last_ts?: string
   entry_count?: number
@@ -172,6 +173,7 @@ export type ReviewQuote = { kind?: string; quote?: string }
 
 // 我的日记：已成文的一篇评价（get_review 返回，时间倒序）
 export type ReviewEntry = {
+  title?: string
   ts?: string
   turns?: number
   span?: string
@@ -205,6 +207,7 @@ export type ReviewProgress = {
 }
 
 export type ReviewBrief = {
+  last_ts?: string
   enabled?: boolean
   entries?: number
   progress_turns?: number

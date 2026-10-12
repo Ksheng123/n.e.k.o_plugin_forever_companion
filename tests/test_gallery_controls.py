@@ -239,14 +239,15 @@ def test_appearance_sliders_scroll_clear_of_the_measured_savebar():
     assert "scroll-margin-block-end: var(--tm-save-clearance, 72px)" in sliders
 
 
-def test_seal_labels_wrap_inside_the_fixed_stamp():
+def test_diary_signature_labels_wrap_in_the_available_column():
     css = BOOK.read_text(encoding="utf-8")
     seal = re.search(r"^\.tmb-seal\s*\{([^}]+)\}", css, flags=re.M).group(1)
     assert "writing-mode: horizontal-tb" in seal
     assert "overflow-wrap: anywhere" in seal
     assert "text-align: center" in seal
     assert 'font-family: "Segoe UI", var(--tmb-round)' in seal
-    assert "width: 46px; height: 66px" in seal
+    assert "max-width: 100%" in seal
+    assert not re.search(r"\b(?:width|height):\s*\d+px", seal)
 
 
 def test_gallery_state_labels_cover_all_locales():
@@ -295,7 +296,7 @@ def test_reading_card_unclips_footer_and_footer_controls_can_wrap():
     for selector in (".tmb-foot", ".tmb-foot-mid"):
         block = re.search(re.escape(selector) + r"\s*\{([^}]+)\}", css).group(1)
         assert "flex-wrap: wrap" in block and "min-width: 0" in block
-    buttons = re.search(r"\.tmb-btn\s*\{([^}]+)\}", css).group(1)
+    buttons = re.search(r"^\.tmb-btn\s*\{([^}]+)\}", css, flags=re.M).group(1)
     assert "max-width: 100%" in buttons and "overflow-wrap: anywhere" in buttons
     narrow = css.split("@media (max-width: 460px)", 1)[1]
     group = re.search(r"\.tmb-foot-mid\s*\{([^}]+)\}", narrow).group(1)
@@ -303,24 +304,14 @@ def test_reading_card_unclips_footer_and_footer_controls_can_wrap():
     assert re.search(r"\.tmb-foot-mid > \.tmb-btn\s*\{[^}]*flex: 1 1 64px", narrow)
 
 
-def test_dark_paper_uses_its_own_highlights_and_midpoint():
+def test_diary_paper_is_opaque_and_independent_of_wallpaper_controls():
     source = BOOK.read_text(encoding="utf-8")
     css = source.split("export const BOOK_STYLES = `", 1)[1]
     light, dark = css.split("@media (prefers-color-scheme: dark)", 1)
-    highlights = ("--tmb-paper-highlight", "--tmb-file-paper-highlight")
-    for token in highlights:
-        assert re.search(re.escape(token) + r":\s*rgba\([^;]+\);", light)
-        dark_value = re.search(re.escape(token) + r":\s*rgba\(([^)]+)\);", dark).group(1)
-        assert 0 < float(dark_value.split(",")[-1]) <= 0.04
-    assert "--tmb-file-paper-mid: #f8fafc;" in light
-    assert "--tmb-file-paper-mid: #22252e;" in dark
-    for selector, token in (
-        (".tmb-page", "--tmb-paper-highlight"),
-        (".tmb-page--file", "--tmb-file-paper-highlight"),
-    ):
+    for theme in (light, dark):
+        for token in ("--tmb-paper", "--tmb-ink", "--tmb-ink-soft"):
+            assert re.search(re.escape(token) + r":\s*#[0-9a-f]{6};", theme)
+    for selector in (".tmb-page", ".tmb-foot", ".tmb-spine"):
         block = re.search(re.escape(selector) + r"\s*\{([^}]+)\}", light).group(1)
-        image = block.split("background-image:", 1)[1].split("box-shadow:", 1)[0]
-        assert f"var({token})" in image
-        assert "rgba(255" not in image and "#f8fafc" not in image
-        assert "var(--tm-text-color)" not in block
-    assert "var(--tmb-file-paper-mid) 54%" in light
+        assert "background: var(--tmb-paper)" in block
+    assert "var(--tm-text-color)" not in css
