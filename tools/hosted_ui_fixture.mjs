@@ -76,7 +76,7 @@ function calendarMonth(year, month) {
   return { year, month, label: `${year} / ${String(month).padStart(2, "0")}`, cells }
 }
 
-export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null } = {}) {
+export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null, heat = "" } = {}) {
   const appearance = { bg_id: wallpaper === "none" ? "" : wallpaper === "video" ? "qa-video" : "qa-wallpaper", fill: "cover", position: "center", blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100, glass: 0, card_alpha: 0, text_weight: 100, motion: true }
   const palettes = {
     olive: [[191, 185, 125], [125, 167, 191]],
@@ -111,6 +111,27 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     const date = new Date(Date.UTC(2026, 3, 1 + index)).toISOString().slice(0, 10)
     return { date, turns: index % 5 === 0 ? 0 : index % 30 + 2, tone: "happy", valence: 0.25 }
   })
+  function heatWindow(start, end) {
+    const counts = [0, 2, 4, 6, 8, 10, 14, 18, 24, 32, 48, 80]
+    const days = []
+    for (let stamp = Date.parse(`${start}T00:00:00Z`), index = 0; stamp <= Date.parse(`${end}T00:00:00Z`); stamp += 86400000, index++) {
+      const date = new Date(stamp).toISOString().slice(0, 10)
+      const turns = heat === "uniform" ? 12 : heat === "outlier" && index === 80 ? 100000 : counts[(Math.imul(index + 19, 2654435761) >>> 16) % counts.length]
+      days.push({ date, turns })
+    }
+    return { days, start, end, year: Number(start.slice(0, 4)), years: [2026, 2025, 2024], months: [] }
+  }
+  const heatmaps = heat ? {
+    2026: heatWindow("2026-06-13", "2026-10-11"),
+    2025: heatWindow("2025-01-01", "2025-12-31"),
+    2024: heatWindow("2024-01-01", "2024-12-31"),
+  } : null
+  let selectedHeat = heatmaps && heatmaps[2026]
+  if (heat === "year") selectedHeat = heatmaps[2025]
+  if (heat === "leap") selectedHeat = heatmaps[2024]
+  if (heat === "short") selectedHeat = heatWindow("2026-01-01", "2026-01-02")
+  if (heat === "boundary") selectedHeat = heatWindow("2026-10-30", "2026-11-03")
+  if (heat === "empty") selectedHeat = { days: [], start: "", end: "", years: [], year: 2026, months: [] }
   const state = {
     status: { enabled: !empty, phase: "follicular", phase_label: "\u56de\u5347\u671f", tone: "success", cycle_day: 9, day_ratio: 9 / 28, days_until_next_period: 20 },
     anchor_date: "2026-09-24", advance_days: 0, lanlan: "\u6d4b\u8bd5\u89d2\u8272",
@@ -131,6 +152,12 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     onboarding: { wizard_pending: wizard, guide: { wizard: "done", version: "qa" }, readiness: { items: [], must_ok: true, all_ok: true, pending: 0 } },
     capabilities: { master_enabled: !empty, hide_disabled_tools: false, capabilities },
     birthday: { date: "2000-10-02", set: true, keep_diary: true },
+  }
+  if (selectedHeat?.start) {
+    const summary = state.stats_summary.summary
+    summary.days_together = (Date.parse(selectedHeat.end) - Date.parse(selectedHeat.start)) / 86400000 + 2
+    summary.total_turns = selectedHeat.days.reduce((sum, day) => sum + day.turns, 0)
+    summary.active_days = selectedHeat.days.filter(day => day.turns > 0).length
   }
   const translate = key => messages[locale]?.[key] || messages.en?.[key] || key
   const gallery = Object.entries(images).map(([id, data], index) => ({ id, name: `qa-landscape-${"ABC"[index]}.png`, mime: "image/png", size: data.length, added_at: TODAY, thumb: data }))
@@ -159,8 +186,8 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     },
     appearance, image, images, gallery, videos, uploads: {}, videoSerial: 0,
     intros, journal, review, diary, reviewProgress: { turns: 32, turns_threshold: 50, days: 4, days_threshold: 7, span: "2026-09-28~2026-10-02", due: false },
-    mediaStorage,
-    stats: { heatmap: { days: heatDays, start: "2026-04-01", end: "2026-10-01", years: [2026], year: 2026, months: [] }, months: ["2026-10", "2026-09", "2026-08"], month: { month: "2026-10", turns: 124, active_days: 2, busiest_day: TODAY, busiest_turns: 68, longest_streak: 2, cold_wars: 0, made_ups: 0, warm_moments: 3, tone: { happy: 72, neutral: 33, sad: 4 }, valence_avg: 0.24, voice: { ts: TODAY, mood: "warm", entry: SAMPLE.repeat(3) }, sealed: false } },
+    mediaStorage, heatmaps,
+    stats: { heatmap: selectedHeat || { days: heatDays, start: "2026-04-01", end: "2026-10-01", years: [2026], year: 2026, months: [] }, months: ["2026-10", "2026-09", "2026-08"], month: { month: "2026-10", turns: 124, active_days: 2, busiest_day: TODAY, busiest_turns: 68, longest_streak: 2, cold_wars: 0, made_ups: 0, warm_moments: 3, tone: { happy: 72, neutral: 33, sad: 4 }, valence_avg: 0.24, voice: { ts: TODAY, mood: "warm", entry: SAMPLE.repeat(3) }, sealed: false } },
   }
 }
 
@@ -318,7 +345,7 @@ export function installFixtureBridge(fixture) {
     if (action === "get_journal") return { pages: fixture.journal }
     if (action === "get_review") return { entries: fixture.review, progress: fixture.reviewProgress }
     if (action === "get_diary") return { items: fixture.diary.slice(Number(args.offset || 0)), has_more: false }
-    if (action === "get_stats") return { ...fixture.stats, month: { ...fixture.stats.month, month: args.month || fixture.stats.month.month } }
+    if (action === "get_stats") return { ...fixture.stats, heatmap: fixture.heatmaps?.[args.year] || fixture.stats.heatmap, month: { ...fixture.stats.month, month: args.month || fixture.stats.month.month } }
     if (action === "get_capability_intro") return clone(fixture.intros[args.capability_id] || { found: false, id: args.capability_id })
     if (action === "update_settings") {
       Object.assign(state.settings, args)

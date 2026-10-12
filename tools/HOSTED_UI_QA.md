@@ -1,5 +1,40 @@
 # Isolated Hosted UI QA
 
+## 1.3.9 Heatmap Readability
+
+The 2026-10-12 plugin-only import test uses a light-blue activity scale matching
+the plain panel. Dark mode and wallpaper mode use a separate blue scale; colors
+remain opaque so wallpaper pixels do not change the level encoding.
+Positive-day quartiles are computed only within the displayed year window.
+Equal counts share a color, zero-count days remain separate, and a very busy
+outlier does not flatten ordinary activity. This is a relative per-window scale,
+not a fixed count scale for comparing years.
+
+Cells remain square at 11..15px with 3px gaps. Month labels share the calendar's
+actual week widths, including 53-week years. Short boundary labels are omitted
+when their one-week slot would overlap the next label; the date range and day
+tooltips remain available. Narrow panels scroll within the chart without clipping
+end-of-year dates. The first week leaves pre-relationship and previous-year
+positions empty.
+
+`../dist/qa-heatmap-139-blue/report.json` passed host-supported typechecking,
+13 interaction scenarios and 13 screenshots with zero render or layout failures.
+Cases cover light/dark, wallpaper, desktop/narrow, ordinary/leap full years,
+year navigation, a two-day window, an October/November boundary, uniform counts,
+outliers, empty data, month alignment and unchanged cell size during hover.
+The complete Python suite passed 812 tests with 38 explicit skips, including
+four new calendar and quartile regressions.
+
+```powershell
+node tools/hosted_ui_harness.mjs --heatmap-only --typecheck --out ../dist/qa-heatmap-139-blue
+```
+
+The browser extension preview was attempted separately; its screenshot did not
+capture the opaque iframe content. Visual acceptance uses the verified existing
+Chromium harness screenshots above. No production Store, host source or Steam
+installation was modified. This version is a local import test, not a new GitHub
+release; Steam import remains the author's acceptance step.
+
 ## 1.3.8 Release Numbering
 
 The official release consolidates the local 1.4.0 through 1.5.0 testing work

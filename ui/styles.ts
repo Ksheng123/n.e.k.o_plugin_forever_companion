@@ -432,8 +432,7 @@ export const PANEL_STYLES = `
      设它们就整体屏蔽 ::-webkit-scrollbar 定制，垂直条退回 ~17px 经典宽吃宽度；
      ②overflow-x 必须显式 hidden——overflow-y:auto 会把 visible 的 overflow-x
      连坐成 auto，入场动画 translateX/1fr min-content 等几 px 瞬时溢出都会弹
-     横向条（日历页反馈同因）。全站无任何需要横滚的内容（热力图也是自适应
-     禁滚），物理封掉无副作用 */
+     横向条（日历页反馈同因）。页面不横滚；长热力图的滚动独立在图内。 */
 }
 .tm-content::-webkit-scrollbar { width: 8px; }
 .tm-content::-webkit-scrollbar-track { background: transparent; }
@@ -1107,61 +1106,42 @@ export const PANEL_STYLES = `
   .tm-badge-wall { grid-template-columns: 1fr; }
 }
 
-/* ---- 热力图（GitHub 贡献图布局：列=周，行=星期几）----
-   tm-gh = 网格骨架：月行（顶）+ 星期列（左）+ 周列区；
-   tm-heat-cell 延续双层表达（深浅=互动量、格底色条=心情）。
-   自适应无滚动（GitHub 同款观感）：滚动容器声明 container-type，
-   格子/间距用 cqw 弹性伸缩——49 列在常规面板宽度下恰好填满。
-   overflow-x 用 hidden 而非 auto：自适应公式已保证装得下，物理上
-   禁止滚动条出现（Electron 面板环境对 overflow:auto 的原生滚动条
-   渲染无法被 ::-webkit-scrollbar 完全约束——沙箱 iframe 里实测
-   无溢出但仍出现蓝灰色横条的案例）；代价是极窄面板（<464px，格子
-   已到 7px 下限）时右侧裁掉少许列，可接受。
-   cqw 兼容性：宿主 Plugin Manager 自身已用 container-type/@container
-   （PluginCard.vue），面板 iframe 同一 Chromium 内核，安全；不支持时
-   clamp() 回退 min 参数（7px 固定格），布局仍成立 */
-.tm-heat-scroll { overflow-x: hidden; padding-bottom: 2px; container-type: inline-size; }
-/* 格子尺寸与间距变量：随容器宽伸缩。真实宽度账本（实测核对）：
-   总宽 = 星期列 18 + body gap 4 + 49 列×(格+gap) − 尾列 1 个 gap
-   ⇒ 可用 = 容器宽 − 22 − 48×gap。gap 固定 2px（clamp 下限）时每列
-   可摊 = (100cqw − 118px) ÷ 49。格子 7px 下限 ⇒ 容器 <461px 才滚动。
-   面板 606px → 格 ~9.9px；720px+ → 11px 顶格 */
-.tm-gh {
-  --tm-gh-cell: clamp(7px, calc((100cqw - 121px) / 49), 11px);
-  --tm-gh-gap: 1.5px;
-  display: inline-flex; flex-direction: column; gap: 1px;
+/* Seven weekday rows with fixed gaps; long histories scroll only inside the chart. */
+.tm-heat {
+  --tm-heat-lv1: #d9eaf3; --tm-heat-lv2: #b4d5e7;
+  --tm-heat-lv3: #81b5d2; --tm-heat-lv4: #4f8fb4;
 }
-/* 窄网格弹性公式换档（热力图改日历年视图后引入）：窗口列数不再固定 49，
-   格子少时（萌新初期 / 去年整年不足 12 个月）沿用 /49 会把格压到 7px 下限、
-   整图缩成左上一窄条。按实际列数换分母：≤12 周走 /12、≤26 周走 /26，
-   使格子放大到 11px 顶格并仍由 49 档兜底整年视图 */
-.tm-gh-w26 { --tm-gh-cell: clamp(7px, calc((100cqw - 121px) / 26), 11px); }
-.tm-gh-w12 { --tm-gh-cell: clamp(7px, calc((100cqw - 121px) / 12), 11px); }
-/* 热力图卡的紧凑间距（第三档·极限）：header 6/0 + body 4/6 —— 上下缓冲压到
-   视觉贴边（卡片有圆角边框做天然边界，不需要大 padding 撑呼吸感）。
-   月报/徽章卡维持默认 —— 阅读型内容需要呼吸感 */
-.tm-heat-card .neko-card-header { padding-top: 6px; padding-bottom: 0; }
-.tm-heat-card .neko-card-body { padding-top: 4px; padding-bottom: 6px; }
-/* 顶部月份行：每列一个等宽槽，只有含新月 1 号的槽渲染标签；
-   高度与格子完全等高（文字用绝对定位垂直居中，不占额外行高位） */
+.tm-heat-scroll {
+  overflow-x: auto; padding: 2px 0 8px; container-type: inline-size;
+  scrollbar-width: thin; scrollbar-color: var(--tm-border) transparent;
+}
+.tm-heat-scroll:focus-visible { outline: 2px solid var(--tm-focus); outline-offset: 2px; border-radius: 2px; }
+/* Reserve 32px for weekdays and use the actual week count, including 53-week years. */
+.tm-gh {
+  --tm-gh-gap: 3px;
+  --tm-gh-cell: clamp(11px, calc((100cqw - 32px - (var(--tm-gh-weeks) - 1) * 3px) / var(--tm-gh-weeks)), 15px);
+  display: flex; width: max-content; flex-direction: column; gap: 8px;
+}
+.tm-heat-card .neko-card-header { padding-top: 14px; padding-bottom: 0; }
+.tm-heat-card .neko-card-body { padding-top: 12px; padding-bottom: 14px; }
+/* Month groups occupy the same columns as their dates. */
 .tm-gh-monthrow { display: flex; gap: var(--tm-gh-gap); }
-.tm-gh-corner { width: 22px; flex: 0 0 22px; }
-.tm-gh-monthslot { width: var(--tm-gh-cell); flex: 0 0 var(--tm-gh-cell); height: var(--tm-gh-cell); position: relative; }
-/* 月份标签（"10月"≈16px）比格子槽（8~11px）宽，absolute 默认从槽左缘向右伸出 ~5px；
-   在网格最右缘（最后一个槽）会撑大 scrollWidth 制造假滚动条——末槽标签改为右对齐
-   （right:0 向左展开），完整显示且不越出容器右缘；中间槽的伸出被右侧相邻列自然覆盖，
-   不会累计到 scrollWidth 之外。垂直：top/bottom 0 + line-height 撑格高，文字随格居中 */
+.tm-gh-corner { width: 29px; flex: 0 0 29px; }
+.tm-gh-monthslot {
+  width: calc(var(--tm-gh-month-weeks) * var(--tm-gh-cell) + (var(--tm-gh-month-weeks) - 1) * var(--tm-gh-gap));
+  flex: none; height: 16px; position: relative;
+}
+/* Keep the final label inside the date grid even for a one-week partial month. */
 .tm-gh-monthslot:last-child .tm-gh-month { left: auto; right: 0; }
 .tm-gh-month {
   position: absolute; left: 0; top: 0; white-space: nowrap;
-  font-size: 9.5px; color: var(--muted); font-weight: 600;
-  line-height: var(--tm-gh-cell);
+  font-size: 11px; color: var(--muted); font-weight: 500; line-height: 16px;
 }
 /* 主体：左侧星期标签列 + 周列区 */
-.tm-gh-body { display: flex; gap: 4px; }
-.tm-gh-wdcol { display: flex; flex-direction: column; gap: var(--tm-gh-gap); width: 18px; flex: 0 0 18px; }
+.tm-gh-body { display: flex; gap: 8px; }
+.tm-gh-wdcol { display: flex; flex-direction: column; gap: var(--tm-gh-gap); width: 24px; flex: 0 0 24px; }
 .tm-gh-wd {
-  height: var(--tm-gh-cell); font-size: 9.5px; color: var(--muted); line-height: 11px;
+  height: var(--tm-gh-cell); font-size: 11px; color: var(--muted); line-height: 1;
   display: flex; align-items: center; user-select: none;
 }
 .tm-gh-wd-empty { visibility: hidden; }
@@ -1172,29 +1152,31 @@ export const PANEL_STYLES = `
 /* 格子本体 */
 .tm-heat-cell {
   position: relative; display: inline-block;
-  width: var(--tm-gh-cell); height: var(--tm-gh-cell); border-radius: 3px;
-  background: rgba(148, 163, 184, 0.16); cursor: default;
-  transition: transform 0.12s ease;
+  width: var(--tm-gh-cell); height: var(--tm-gh-cell); border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(27, 31, 35, 0.08); cursor: default;
 }
-.tm-heat-cell:hover { transform: scale(1.25); }
+.tm-gh .tm-heat-cell:hover { outline: 2px solid var(--text); outline-offset: 1px; }
 .tm-heat-lv0 { background: var(--tm-heat-empty); }
-.tm-heat-lv1 { background: color-mix(in srgb, var(--secondary) 32%, transparent); }
-.tm-heat-lv2 { background: color-mix(in srgb, var(--secondary) 55%, transparent); }
-.tm-heat-lv3 { background: color-mix(in srgb, var(--secondary) 78%, transparent); }
-.tm-heat-lv4 { background: var(--secondary); }
-/* 滚动条彻底隐藏（overflow-x:hidden 已物理禁止；此处双保险把 gutter
-   也归零——Windows 上 overflow 容器即使无溢出也可能保留 scrollbar gutter） */
-.tm-heat-scroll { scrollbar-width: none; }
-.tm-heat-scroll::-webkit-scrollbar { display: none; height: 0; }
-.tm-heat-scroll::-webkit-scrollbar-track { background: transparent; }
-.tm-heat-scroll::-webkit-scrollbar-thumb { background: transparent; }
+.tm-heat-lv1 { background: var(--tm-heat-lv1); }
+.tm-heat-lv2 { background: var(--tm-heat-lv2); }
+.tm-heat-lv3 { background: var(--tm-heat-lv3); }
+.tm-heat-lv4 { background: var(--tm-heat-lv4); }
+@media (prefers-color-scheme: dark) {
+  .tm-heat {
+    --tm-heat-lv1: #263e4d; --tm-heat-lv2: #426781;
+    --tm-heat-lv3: #679bbd; --tm-heat-lv4: #9ccae3;
+  }
+}
+.tm-has-bg .tm-heat {
+  --tm-heat-lv1: #263e4d; --tm-heat-lv2: #426781;
+  --tm-heat-lv3: #679bbd; --tm-heat-lv4: #9ccae3;
+}
 /* 底部脚注：说明文案 + 图例（GitHub 同款右下角布局） */
-.tm-heat-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 3px; }
-.tm-heat-note { font-size: 10.5px; color: var(--muted); }
+.tm-heat-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.tm-heat-note { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tm-heat-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-left: auto; }
-/* 图例在 .tm-heat-scroll 之外，拿不到 --tm-gh-cell（cqw 变量只在容器后代有效）；
-   固定 10px 小方块，与网格格子语义解耦 */
-.tm-heat-legend .tm-heat-cell { width: 10px; height: 10px; flex: 0 0 10px; }
+/* The legend keeps its own size outside the chart's sizing container. */
+.tm-heat-legend .tm-heat-cell { width: 11px; height: 11px; flex: 0 0 11px; }
 .tm-heat-legend-label { font-size: 10.5px; color: var(--muted); margin: 0 2px; }
 
 /* ---- 月报 ---- */

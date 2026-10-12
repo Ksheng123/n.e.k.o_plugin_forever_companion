@@ -13,6 +13,7 @@ import { introChecks } from "./hosted_ui_intro_checks.mjs"
 import { appearanceChecks, expandAppearance } from "./hosted_ui_appearance_checks.mjs"
 import { videoChecks } from "./hosted_ui_video_checks.mjs"
 import { directChecks } from "./hosted_ui_direct_checks.mjs"
+import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -1332,6 +1333,10 @@ async function main() {
     })
     await new Promise(resolvePromise => server.listen(0, "127.0.0.1", resolvePromise))
     origin = `http://127.0.0.1:${server.address().port}`
+    if (process.argv.includes("--serve-only")) {
+      console.log(`ISOLATED_PREVIEW ${origin}`)
+      await new Promise(() => {})
+    }
     const launch = { headless: true }
     const executable = option("browser-executable", process.env.NEKO_UI_BROWSER)
     if (executable) launch.executablePath = executable
@@ -1339,7 +1344,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1379,6 +1384,11 @@ async function main() {
         report.screenshots.push(...direct.screenshots)
         report.interactions.push(...direct.checks)
         report.directPlayback = direct.measurements
+      }
+      if (process.argv.includes("--heatmap") || process.argv.includes("--heatmap-only")) {
+        const heatmap = await heatmapChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...heatmap.screenshots)
+        report.interactions.push(...heatmap.checks)
       }
     } finally {
       if (browser) await browser.close()

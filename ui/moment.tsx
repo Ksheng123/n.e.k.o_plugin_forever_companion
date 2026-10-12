@@ -4,7 +4,7 @@
 // hosted-tsx 约束：唯一 export 排在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
 import { Card, EmptyState, StatusBadge, useRef } from "@neko/plugin-ui"
 import type { BirthdayView, HeatDay, Heatmap, MonthReport, StatsBadge, StatsSummary, TFunc } from "./types"
-import { heatLevel, monthLabel, moodDotColor, toneLabelKey } from "./utils"
+import { heatLevel, heatThresholds, monthLabel, moodDotColor, toneLabelKey } from "./utils"
 import { BirthdaySettingsCard } from "./birthdaycard"
 
 export function MomentPane(props: {
@@ -358,9 +358,8 @@ function badgeLabel(t: TFunc, badge: StatsBadge): string {
 // 窗口由后端下发（start/end）：起点 = max(首条互动日, 视图年 1 月 1 日)——相识之前
 // 的日子不铺格，新装只有几格、随天数生长；终点 = min(12 月 31 日, 昨天)，今天明天才亮格。
 // 视图年不是当年时可 ‹ › 翻年份（复用月报导航样式，仅一年数据时隐藏）。
-// 窄网格切换弹性公式档位（tm-gh-w12/w26），格子不被 /49 公式压到 7px 下限。
-// 月份标签只标包含新月首日的那一列（顶部），左侧标一/三/五。
-// 格子深浅（4 档蓝）= 当天互动轮数；窗口内无记录天 = 浅灰格；窗口外不渲染（透明占位保持列高）。
+// Use the actual week count for sizing; narrow panels scroll inside the chart without discarding days.
+// Month labels span their weeks; equal turn counts always share a positive-day quartile.
 // 还没有可展示日子时卡内渲染空态，不再铺默认网格
 // hosted-tsx 无 SVG：格子用 div + 档位色；悬停 Tooltip 显示当日明细
 function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year: string) => void }) {
@@ -372,7 +371,7 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
   const end = String((heatmap && heatmap.end) || "")
   const byDate: Record<string, HeatDay> = {}
   days.forEach((day) => {
-    if (day && day.date) byDate[String(day.date)] = day
+    if (day && day.date && day.date >= start && day.date <= end) byDate[String(day.date)] = day
   })
   const showGrid = !!start && !!end && start <= end
   const weekList = showGrid ? buildWeekColumns(start, end) : []
@@ -380,7 +379,12 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
     ...week,
     monthLabel: week.monthNo ? t("panel.stats.monthShort", { defaultValue: "{m}月" }).replace("{m}", String(week.monthNo)) : "",
   }))
-  const sizeClass = weekList.length <= 12 ? " tm-gh-w12" : weekList.length <= 26 ? " tm-gh-w26" : ""
+  const thresholds = heatThresholds(Object.values(byDate).map((day) => Number(day.turns) || 0))
+  const monthGroups: { key: string; label: string; count: number }[] = []
+  weeks.forEach((week) => {
+    if (week.monthLabel || !monthGroups.length) monthGroups.push({ key: week.key, label: week.monthLabel, count: 0 })
+    monthGroups[monthGroups.length - 1].count++
+  })
   const idx = years.indexOf(curYear)
   const prevYear = idx >= 0 && idx < years.length - 1 ? String(years[idx + 1]) : ""
   const nextYear = idx > 0 ? String(years[idx - 1]) : ""
@@ -402,9 +406,9 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
     )
   }
   return (
-    <div>
-      {years.length > 1 ? (
-        <div className="tm-month-nav">
+    <div className="tm-heat">
+      <div className="tm-month-nav tm-heat-nav">
+        {years.length > 1 ? (
           <button
             type="button"
             className="tm-month-btn"
@@ -413,11 +417,11 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
           >
             ‹
           </button>
-          <span className="tm-month-label">
-            {curYear && curYear === years[0]
-              ? t("panel.stats.heatYearThis", { defaultValue: "今年" })
-              : t("panel.stats.heatYearN", { defaultValue: "{y} 年" }).replace("{y}", String(curYear))}
-          </span>
+        ) : null}
+        <span className="tm-month-label">
+          {t("panel.stats.heatYearN", { defaultValue: "{y} 年" }).replace("{y}", String(curYear))}
+        </span>
+        {years.length > 1 ? (
           <button
             type="button"
             className="tm-month-btn"
@@ -426,15 +430,15 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
           >
             ›
           </button>
-        </div>
-      ) : null}
-      <div className="tm-heat-scroll">
-        <div className={`tm-gh${sizeClass}`}>
+        ) : null}
+      </div>
+      <div className="tm-heat-scroll" tabIndex={0} role="region" aria-label={t("panel.stats.heatmap", { defaultValue: "相处热力图" })}>
+        <div className="tm-gh" style={{ "--tm-gh-weeks": String(weekList.length) } as any}>
           <div className="tm-gh-monthrow">
             <span className="tm-gh-corner" />
-            {weeks.map((week) => (
-              <span key={week.key} className="tm-gh-monthslot">
-                {week.monthLabel ? <span className="tm-gh-month">{week.monthLabel}</span> : null}
+            {monthGroups.map((group, index) => (
+              <span key={group.key} className="tm-gh-monthslot" style={{ "--tm-gh-month-weeks": String(group.count) } as any}>
+                {group.count > 1 || index === monthGroups.length - 1 ? <span className="tm-gh-month">{group.label}</span> : null}
               </span>
             ))}
           </div>
@@ -445,19 +449,19 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
               ))}
             </div>
             <div className="tm-gh-cols">
-              {weeks.map((week, wi) => (
+              {weeks.map((week) => (
                 <div key={week.key} className="tm-gh-col">
                   {week.cells.map((date, i) => {
                     if (!date) {
                       return <span key={i} className="tm-heat-future" />
                     }
                     const day = byDate[date]
-                    const lv = heatLevel(day ? day.turns : 0)
+                    const lv = heatLevel(day ? day.turns : 0, thresholds)
                     const tip = `${date} · ${t("panel.stats.heatTipTurns", { defaultValue: "互动 {n} 轮" }).replace("{n}", String((day && day.turns) || 0))}`
                     // 悬停明细由自适应 Tip 承载（顶部行自动向下翻、左右缘自动收拢）
                     return (
                       <AdaptiveTip key={date} content={tip}>
-                        <span className={`tm-heat-cell tm-heat-lv${lv}`} />
+                        <span className={`tm-heat-cell tm-heat-lv${lv}`} data-date={date} role="img" aria-label={tip} />
                       </AdaptiveTip>
                     )
                   })}
@@ -469,12 +473,16 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
       </div>
       <div className="tm-heat-footer">
         <span className="tm-heat-note">
-          {t("panel.stats.heatNote", { defaultValue: "颜色深浅 = 当天互动轮数；悬停查看明细" })}
+          {start} ~ {end}
         </span>
         <div className="tm-heat-legend">
           <span className="tm-heat-legend-label">{t("panel.stats.heatLess", { defaultValue: "少" })}</span>
           {[0, 1, 2, 3, 4].map((lv) => (
-            <span key={lv} className={`tm-heat-cell tm-heat-lv${lv}`} />
+            <span
+              key={lv}
+              className={`tm-heat-cell tm-heat-lv${lv}`}
+              title={t("panel.stats.heatTipTurns", { defaultValue: "互动 {n} 轮" }).replace("{n}", lv === 0 ? "0" : lv < 4 ? `≤ ${thresholds[lv - 1]}` : `> ${thresholds[2]}`)}
+            />
           ))}
           <span className="tm-heat-legend-label">{t("panel.stats.heatMore", { defaultValue: "多" })}</span>
         </div>
@@ -505,24 +513,27 @@ function weekdayIndex(d: Date): number {
 function buildWeekColumns(firstDate: string, lastDate: string): WeekColumn[] {
   const first = parseISODate(firstDate)
   const last = parseISODate(lastDate)
-  if (!first || !last) return []
+  if (!first || !last || first.getTime() > last.getTime()) return []
   const start = new Date(first.getFullYear(), first.getMonth(), first.getDate() - weekdayIndex(first))
   const weeks: WeekColumn[] = []
   let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate())
   let idx = 0
+  let previousMonth = 0
   while (cursor.getTime() <= last.getTime()) {
     const cells: string[] = []
     let monthNo = 0
     for (let i = 0; i < 7; i++) {
       const d = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + i)
-      cells.push(d.getTime() <= last.getTime() ? isoOfDate(d) : "")
-      if (d.getDate() === 1 && d.getTime() <= last.getTime()) {
+      const visible = d.getTime() >= first.getTime() && d.getTime() <= last.getTime()
+      cells.push(visible ? isoOfDate(d) : "")
+      if (visible && d.getDate() === 1) {
         monthNo = d.getMonth() + 1
       }
     }
-    if (idx === 0 && !monthNo) {
-      monthNo = cursor.getMonth() + 1
-    }
+    if (idx === 0) monthNo = first.getMonth() + 1
+    else if (!monthNo && cursor.getMonth() + 1 !== previousMonth) monthNo = cursor.getMonth() + 1
+    if (monthNo === previousMonth) monthNo = 0
+    if (monthNo) previousMonth = monthNo
     weeks.push({ key: isoOfDate(cursor), cells, monthNo })
     cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7)
     idx++

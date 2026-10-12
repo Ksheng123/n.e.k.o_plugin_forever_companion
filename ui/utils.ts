@@ -118,13 +118,19 @@ export function heatDayMoodKey(day: { tone?: string; valence?: number | null }):
   return moodWordOf(Number(day.valence) || 0, 0.5)
 }
 
-// 热力图格子档位：turns → 0~4 档（0=无记录，1~4 递增），CSS 按档取色
-export function heatLevel(turns?: number): number {
+// Positive-day quartiles keep typical activity visible without letting a single busy day flatten the scale.
+export function heatThresholds(turns: number[]): number[] {
+  const active = turns.filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b)
+  if (!active.length) return [9, 29, 79]
+  return [0.25, 0.5, 0.75].map((q) => active[Math.ceil(active.length * q) - 1])
+}
+
+export function heatLevel(turns?: number, thresholds: number[] = [9, 29, 79]): number {
   const n = Number(turns) || 0
   if (n <= 0) return 0
-  if (n < 10) return 1
-  if (n < 30) return 2
-  if (n < 80) return 3
+  for (let i = 0; i < thresholds.length; i++) {
+    if (n <= thresholds[i]) return i + 1
+  }
   return 4
 }
 
