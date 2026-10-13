@@ -678,6 +678,7 @@ class ForeverCompanionPlugin(
         # 我的日记在飞成文的角色集合（1.2.3）：同一角色成文期间不允许多条链路
         #（tick 自动 / 面板队列 / 调试入口）并发跑模型，见 _maybe_write_review
         self._review_writing: set[str] = set()
+        self._journal_writing: set[str] = set()
         self._supervise_lock = threading.Lock()
         self._init_media_gallery()
         self._last_tool_health_ts = 0.0
@@ -947,6 +948,14 @@ class ForeverCompanionPlugin(
         return Ok(build_status_payload(phase, enabled=self._enabled()))
 
 
+    @timer_interval(id="diary_write_tick", seconds=2, auto_start=True)
+    async def diary_write_tick(self, **_: Any):
+        # Host timers own separate threads/loops; tasks created in tide_tick would
+        # be cancelled when its asyncio.run returns.
+        await self._drain_pending_review_writes()
+        await self._drain_pending_journal_writes()
+        return Ok({"status": "drained"})
+
     @timer_interval(id="tide_tick", seconds=10, auto_start=True)
     async def tick(self, **_: Any):
         # 协调监督优先于 enabled 拦截：暂停中的主动搭话必须始终有人接管
@@ -956,10 +965,6 @@ class ForeverCompanionPlugin(
         # 必须在 _ensure_tools_registered 之前：巡检要看到最新隐藏名单
         self._sync_tool_visibility()
         await self._ensure_tools_registered()
-        # 面板「立即写一篇」的排队成文同样在 enabled 拦截之前消费（1.2.3）：
-        # 入口只做受理秒回，写在这里起跑——"我的日记"只认 [review].enabled，
-        # 潮汐总开关关着时队列也必须能被写掉
-        await self._drain_pending_review_writes()
         # enabled 判定前移到角色解析之前：没有任何 shard 显式开启且全局默认关闭时
         # （默认安装即此态），后续步骤全部跳过——否则角色解析 HTTP（15s 缓存）
         # 在空闲期每天空转数千次。

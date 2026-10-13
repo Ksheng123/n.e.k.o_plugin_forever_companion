@@ -306,6 +306,10 @@ class PanelEntriesMixin(MediaGalleryMixin):
             # 邀请挂起态（1.2.3）：递过邀请、她还没落笔——日记页显示"等她"提示，
             # 免得"点了没反应、过一会凭空多一页"
             "journal_invite_pending": self._journal_invite_pending(shard),
+            "journal_write": {
+                "writing": shard.pending_journal_write is not None or lanlan in self._journal_writing,
+                "last_result": shard.journal_write_result,
+            },
             # 我的日记（0.8.0）：篇数 + 素材进度（极轻量）；全量翻阅走
             # get_review 入口按需拉取，成文正文不进 5s 轮询。
             # writing / last_result（1.2.3）：面板「立即写一篇」改排队成文后的
@@ -1601,27 +1605,37 @@ class PanelEntriesMixin(MediaGalleryMixin):
     )
     @plugin_entry(
         id="invite_journal",
-        name=tr("entries.invite_journal.name", default="递一次个人日记邀请"),
+        name=tr("entries.invite_journal.name", default="生成一篇个人日记"),
         description=tr(
             "entries.invite_journal.description",
-            default="立即向她递一条写日记的邀请（带写作素材）：当面递到她手上，她当场收到、自己决定写不写；10 分钟内刚递过时改为安静补递。仅作用于当前角色。",
+            default="素材足够时在后台生成一篇第一人称个人日记并保存，不再等待角色决定是否写作。复用我的日记的模型槽位与通道。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
         metadata={"agent_hidden": True},
     )
     async def invite_journal(self, **_: Any):
-        # 返回 (invited, deliver)：deliver ∈ ""(未递出：开关未开) / failed(传输拒收) /
-        # respond(当面递到，她当场收到并可当场落笔) / read(冷却内静默补递)。
-        # i18n 契约（1.3.0 第九轮）：四态只回 invited/mode 码，面板按码翻译
-        # （panel.journal.inviteFailed/inviteOff/invitedRespond/invitedQuiet）；
-        # 传输被拒时语义仍是"没送到"，绝不沿用"已递出"的措辞（1.2.4 审查修复不变）
         lanlan, shard = await self._current_shard_async()
-        invited, deliver = await self._maybe_journal_invite(lanlan, shard, force=True)
-        if not invited and deliver == "failed":
-            return Ok({"invited": False, "mode": deliver, "lanlan": lanlan})
-        if not invited:
-            return Ok({"invited": False, "lanlan": lanlan})
-        return Ok({"invited": True, "mode": deliver, "lanlan": lanlan})
+        if shard.pending_journal_write is not None or lanlan in self._journal_writing:
+            return Ok({"accepted": False, "reason": "already_writing", "lanlan": lanlan})
+        if not self._journal_enabled(shard):
+            return Ok({"accepted": False, "reason": "disabled", "lanlan": lanlan})
+        material = await self._manual_journal_material(lanlan, shard)
+        passed, reason, _ = await self._journal_write_gate(lanlan, shard, material)
+        if not passed:
+            payload: JsonObject = {"accepted": False, "reason": reason, "lanlan": lanlan}
+            if reason == "slot_unresolved":
+                status = await self._channel_dormancy(
+                    True, self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT,
+                    lanlan=lanlan, channel="review", shard=shard,
+                )
+                payload["dormant_reason"] = status.get("dormant_reason") or "no_model"
+            return Ok(payload)
+        # Endpoint/material checks await; another click may have queued meanwhile.
+        if shard.pending_journal_write is not None or lanlan in self._journal_writing:
+            return Ok({"accepted": False, "reason": "already_writing", "lanlan": lanlan})
+        shard.pending_journal_write = material
+        shard.journal_write_result = None
+        return Ok({"accepted": True, "queued": True, "lanlan": lanlan})
 
     @ui.action(
         label=tr("actions.delete_diary_item.label", default="删除这条片段"),
@@ -1809,6 +1823,11 @@ class PanelEntriesMixin(MediaGalleryMixin):
         # 通过就打排队标记立即返回；成文由 tick 的 _drain_pending_review_writes
         # 执行，结果经 dashboard 的 review_brief.writing / last_result 回流面板。
         lanlan, shard = await self._current_shard_async()
+        if shard.pending_review_write or lanlan in self._review_writing:
+            return Ok({
+                "written": False, "queued": False, "accepted": False, "lanlan": lanlan,
+                "reason": "already_writing",
+            })
         passed, reason, _resolved = await self._review_write_gate(shard, force=True)
         if not passed:
             # i18n 契约（1.3.0 第九轮）：只回 reason 码与数据字段，面板按码翻译

@@ -14,6 +14,71 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
       console.log(`FAIL ${name}: ${error.message}`)
     }
   }
+  for (const locale of Object.keys(sources.messages)) {
+    for (const width of [1280, 390]) {
+      const loaded = await loadPage(browser, origin, { locale, tab: "diary", wallpaper: "none" }, width, 900, "light")
+      const { page, frame, context, errors } = loaded
+      const text = sources.messages[locale]
+      const refresh = async () => {
+        const payload = await page.evaluate(() => window.qaFixture.context)
+        await frame.evaluate(next => window.__NekoRefreshHostedPayload(next), payload)
+      }
+      try {
+        for (const kind of ["journal", "review"]) {
+          await check(`manual-${kind}-${locale}-${width}-queue-progress-and-specific-failure`, async () => {
+            const action = kind === "journal" ? "invite_journal" : "write_review_now"
+            const stateKey = kind === "journal" ? "journal_write" : "review_brief"
+            await frame.getByRole("button", { name: text[kind === "journal" ? "panel.journal.tabJournal" : "panel.review.tabReview"], exact: true }).click()
+            await page.evaluate(({ action, stateKey }) => {
+              window.qaResults[action] = { accepted: true, queued: true }
+              window.qaFixture.context.state[stateKey] = { writing: false, last_result: null }
+            }, { action, stateKey })
+            const label = text[kind === "journal" ? "panel.journal.invite" : "panel.review.writeNow"]
+            await frame.getByRole("button", { name: label, exact: true }).click()
+            await frame.waitForFunction(expected =>
+              [...document.querySelectorAll(".neko-toast")].some(item => item.textContent.includes(expected)), text["panel.review.accepted"])
+            await page.evaluate(stateKey => {
+              window.qaFixture.context.state[stateKey] = { writing: true, last_result: null }
+            }, stateKey)
+            await refresh()
+            await frame.getByRole("button", { name: text["panel.review.writing"], exact: true }).waitFor()
+            assert(await frame.getByRole("button", { name: text["panel.review.writing"], exact: true }).isDisabled())
+            const progressKey = kind === "journal" ? "panel.journal.writingHint" : "panel.review.writingHint"
+            assert((await frame.locator(".tm-content").innerText()).includes(text[progressKey]))
+            for (const [reason, key] of [
+              ["request_failed", "panel.writing.requestFailed"],
+              ["request_timeout", "panel.writing.requestTimeout"],
+              ["invalid_reply", "panel.writing.invalidReply"],
+              ["budget_exhausted", "panel.writing.budget"],
+              ["persist_failed", "panel.review.persistFailed"],
+            ]) {
+              await page.evaluate(({ stateKey, reason }) => {
+                window.qaFixture.context.state[stateKey] = { writing: false, last_result: { ts: Date.now(), written: false, reason } }
+              }, { stateKey, reason })
+              await refresh()
+              await frame.waitForFunction(({ key, expected }) =>
+                [...document.querySelectorAll(".tm-derived")].some(item => item.textContent.includes(expected)), { key, expected: text[key] })
+              assert(await frame.getByRole("button", { name: label, exact: true }).isEnabled())
+            }
+            await page.evaluate(stateKey => {
+              window.qaFixture.context.state[stateKey] = { writing: false, last_result: { ts: Date.now(), written: true, reason: "written" } }
+            }, stateKey)
+            await refresh()
+            await frame.locator(".neko-toast").first().waitFor({ state: "detached", timeout: 6000 })
+            const id = `manual-${kind}-${locale}-${width}`
+            const path = join(output, `${id}.png`)
+            await page.screenshot({ path, animations: "disabled" })
+            const layout = await inspectLayout(frame)
+            assert.equal(layout.documentOverflow, 0)
+            assert.equal(layout.contentOverflow, 0)
+            assert.deepEqual(layout.issues, [])
+            screenshots.push({ id, path, layout, errors: [...errors], diagnostics: [] })
+            assert.deepEqual(errors, [])
+          })
+        }
+      } finally { await context.close() }
+    }
+  }
   for (const [width, theme, locale] of [[1000, "light", "zh-CN"], [1000, "dark", "en"], [390, "light", "zh-CN"], [390, "dark", "en"]]) {
     const loaded = await loadPage(browser, origin, { locale, tab: "diary", wallpaper: "none", diaryCase: "many" }, width, 900, theme)
     const { page, frame, context, errors } = loaded

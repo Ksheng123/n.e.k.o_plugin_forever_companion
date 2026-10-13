@@ -184,6 +184,7 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     journal_archive_brief: { pages: empty ? 0 : 2, first_ts: "2026-01-01", last_ts: "2026-02-28" },
     review_archive_brief: { entries: empty ? 0 : 2, first_ts: "2026-01-01", last_ts: "2026-02-28" },
     journal_invite_pending: false,
+    journal_write: { writing: false, last_result: null },
     lanlan_list: [{ name: "\u6d4b\u8bd5\u89d2\u8272", enabled: true, phase: "follicular" }, { name: "\u53e6\u4e00\u4f4d\u6d4b\u8bd5\u89d2\u8272", enabled: false, phase: "luteal" }, { name: "\u5df2\u5220\u9664\u7684\u6d4b\u8bd5\u89d2\u8272", orphan: true }],
     tone_slot_options: ["", "conversation", "summary", "agent", "correction", "vision"].map(value => ({ value, model: value ? `qa-${value}-model` : "qa-emotion-model" })),
     review_brief: { enabled: true, entries: review.length, last_ts: review[0]?.ts || "", progress_turns: 32, turns_threshold: 50, writing: false, last_result: null },

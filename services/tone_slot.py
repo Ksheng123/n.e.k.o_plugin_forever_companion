@@ -215,10 +215,20 @@ def _exc_shape(exc: BaseException) -> str:
     足够区分 DNS/拒绝连接/401/429 这一类诊断分级（宿主规范：优先记录脱敏后的
     长度、ID 和错误类型）。
     """
-    code = getattr(exc, "code", None)
+    code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
     if isinstance(code, int):
         return f"{type(exc).__name__}(code={code})"
     return type(exc).__name__
+
+
+def _is_request_timeout(exc: BaseException) -> bool:
+    import urllib.error
+
+    if isinstance(exc, urllib.error.URLError):
+        exc = exc.reason
+    return isinstance(exc, TimeoutError) or type(exc).__name__ in {
+        "APITimeoutError", "ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout",
+    }
 
 
 def _payload_shape(payload: object) -> str:
@@ -248,13 +258,15 @@ def _post_chat_completion(
     *,
     timeout_sec: float = 15.0,
     logger: Any = None,
+    raise_timeout: bool = False,
 ) -> str | None:
-    """同步直连 OpenAI 兼容 /chat/completions（stdlib urllib，零依赖）；任何失败 → None。
+    """同步直连 OpenAI 兼容 /chat/completions（stdlib urllib，零依赖）；默认失败 → None。
 
     调用处用 asyncio.to_thread 包裹，不阻塞事件循环——这条请求是同步阻塞的，
     直接 await 会把整个 tick 的事件循环按住到超时为止。空 key 不加 Authorization
     头（本地端点常无鉴权）。logger 由调用方（主类委托）传入；为 None 时静默。
     timeout_sec 由调用方按通道给（碎片快、成文慢），默认 15 秒是 1.3.1 的写死值。
+    手动写作传 raise_timeout=True 时，明确超时改抛脱敏 TimeoutError，供重试与反馈使用。
     """
     import json as _json
     import urllib.request
@@ -279,6 +291,8 @@ def _post_chat_completion(
         # URL/凭据，见 _exc_shape 的隐私契约
         if logger is not None:
             logger.warning("tone direct chat completion failed: {}", _exc_shape(exc))
+        if raise_timeout and _is_request_timeout(exc):
+            raise TimeoutError() from None
         return None
     choices = payload.get("choices") if isinstance(payload, dict) else None
     if isinstance(choices, list) and choices:

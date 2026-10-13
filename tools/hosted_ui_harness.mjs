@@ -1286,7 +1286,7 @@ async function copyChecks(browser, sources, origin, output) {
         assert(await loaded.frame.getByRole("button", { name: text["panel.review.writing"], exact: true }).isDisabled())
         await capture(loaded, `copy-${locale}-review-writing`)
         await refreshState(loaded, { review_brief: { enabled: true, entries: 0, writing: false, last_result: { ts: "qa-failed", written: false } } })
-        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.review.lastFailed"]))
+        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.review.writeFailed"]))
         const outcomes = [
           [{ accepted: true }, "panel.review.accepted"],
           [{ reason: "already_writing" }, "panel.review.alreadyWriting"],

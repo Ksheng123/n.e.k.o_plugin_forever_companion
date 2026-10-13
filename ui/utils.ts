@@ -428,3 +428,26 @@ export function settingsToForm(settings: Settings): FormValues {
     debug_mode: settings.debug_mode === true,
   }
 }
+
+export function diaryWriteError(result: any, t: any): string {
+  const reason = result && result.reason
+  if (reason === "persist_failed") {
+    return t("panel.review.persistFailed", { defaultValue: "内容已生成，但保存失败。素材已保留，可稍后重试。" })
+  }
+  if (reason === "disabled") return t("panel.writing.disabled", { defaultValue: "功能未开启，请先开启当前角色的模拟和对应日记功能。" })
+  if (reason === "budget_exhausted" || (reason === "slot_unresolved" && result.dormant_reason === "budget")) {
+    return t("panel.writing.budget", { defaultValue: "今日模型调用预算已用完，素材已保留。" })
+  }
+  if (reason === "channel_rejected" || (reason === "slot_unresolved" && result.dormant_reason === "rejected")) {
+    return t("panel.channel.rejected", { defaultValue: "请求被拒绝 · 通道已暂停" })
+  }
+  if (reason === "slot_unresolved") {
+    return result.dormant_reason === "free_route"
+      ? t("onboarding.channels.freeRoute", { defaultValue: "免费路由不支持直连" })
+      : t("onboarding.channels.noModel", { defaultValue: "未配置模型" })
+  }
+  if (reason === "request_timeout") return t("panel.writing.requestTimeout", { defaultValue: "模型生成超时；素材已保留，可稍后重试。" })
+  if (reason === "request_failed") return t("panel.writing.requestFailed", { defaultValue: "模型请求失败或超时；素材已保留，请检查模型通道后再试。" })
+  if (reason === "invalid_reply") return t("panel.writing.invalidReply", { defaultValue: "模型未返回有效日记正文；素材已保留，可稍后重试。" })
+  return t("panel.review.writeFailed", { defaultValue: "生成失败，请稍后重试" })
+}

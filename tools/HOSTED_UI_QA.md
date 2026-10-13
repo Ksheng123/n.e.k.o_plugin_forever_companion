@@ -1,5 +1,90 @@
 # Isolated Hosted UI QA
 
+## 1.3.9 Manual Diary Timeout Fix
+
+This acceptance supersedes the initial 25-second manual deadline below.
+Each manual model attempt can now wait up to 45 seconds, with at most two
+attempts and a 90-second total deadline. Pending manual writes are consumed by
+the independent SDK `diary_write_tick` timer. The host runs each interval timer
+in its own thread and event loop, so slow manual generation does not hold up
+the regular message and mood-analysis timer. Automatic My Diary defers while
+manual writing is pending or active and keeps its existing thresholds afterward.
+
+The 2026-10-13 live logs show two separate failures: HTTP 400 on `host|summary`
+at 10:41:21 and 10:41:31, followed by circuit suspension; the personal manual
+request accepted at 10:49:09 then failed at 10:49:37 without a transport exception
+line. The latter is consistent with the previous outer deadline, but the old
+logs cannot prove the precise timeout source. My Diary's success at 10:49:52
+was an automatic threshold write, not a second button request.
+
+Explicit transport or outer-deadline timeouts now return `request_timeout`
+without incrementing rejection failures. Regression cases cover a full first
+timeout followed by a successful second attempt, the total deadline, retained
+material, main-timer responsiveness, wrapped urllib timeouts, host cancellation
+cleanup and redacted diagnostics. Success logs identify manual/automatic writes;
+failure logs report the route, attempt, elapsed time and reason without content.
+
+The final Python suite passed 938 tests with 38 explicit skips. Ruff 0.12.4,
+hosted linking (32 modules, zero remaining bare exports), the host-supported
+typecheck and `git diff --check` passed.
+`../dist/qa-manual-diary-timeout-139/report.json` recorded 85 passing interaction
+checks and 56 screenshots with zero check, render or layout failures. Both
+manual paths exercised the new timeout feedback in all eight locales at
+1280px and 390px. Chinese desktop and narrow screenshots were inspected.
+
+The build target is
+`../dist/forever_companion_1.3.9_manual_diary_timeout.neko-plugin`.
+This is a local import-test update: no host code, production Store or
+installation is changed, and no release or tag is created. Production model
+generation has not been retested with this fix.
+
+```powershell
+uv run --frozen python -m pytest tests -q -p no:cacheprovider
+node tools/check_hosted_link.mjs .
+node tools/hosted_ui_harness.mjs --diary-only --typecheck --out ../dist/qa-manual-diary-timeout-139
+uv run --frozen python tools/build_import_package.py --host '../N.E.K.O' --output '../dist/forever_companion_1.3.9_manual_diary_timeout.neko-plugin'
+```
+
+## 1.3.9 Manual Diary Generation (Initial Acceptance)
+
+Personal Journal's manual button now queues a first-person entry when a complete
+recent exchange or fresh Time Diary material is available. My Diary still needs
+at least ten interaction turns for manual generation. Neither manual path asks
+the character to choose whether to write. Automatic journal invitations remain
+voluntary. Manual attempts share a 25-second model deadline, with at most two
+calls through the existing review channel, budget and circuit breaker.
+
+On 2026-10-13, the complete Python suite passed 929 tests with 38 explicit skips.
+Regression cases cover successful writes, retries, timeouts, retained material,
+save rollback, character isolation, titles, archive/restart, duplicate requests,
+tool contention, capability changes, budget exhaustion, circuit changes and
+private-content-free exception logs. Ruff 0.12.4 and `git diff --check` passed.
+Hosted linking reported 32 modules and zero remaining bare exports; the
+host-supported typecheck passed.
+
+`../dist/qa-manual-diary-139-final/report.json` recorded 85 passing interaction
+checks and 56 screenshots, including all eight locales at 1280px and 390px for
+both manual buttons. These cases exercise acceptance, disabled writing buttons,
+persistent specific failures, completion feedback and existing diary navigation.
+There were zero check, render or layout failures. Chinese desktop and narrow
+screenshots were inspected. The shared-panel regression at
+`../dist/qa-mood-manual-diary-regression-139/report.json` also passed all 16 mood
+checks and screenshots, including typechecking.
+
+The official strict validator and isolated build passed for
+`../dist/forever_companion_1.3.9_manual_diary.neko-plugin`: ZIP CRC and payload
+hash verified, with 77 packaged source files matching the plugin directory.
+No host source, production Store, Steam install, release or tag was modified.
+The preceding mood commit `7813adc` is pushed; these diary changes remain local
+for import testing. These tests use isolated fixtures and do not verify the
+availability of the user's live model endpoint.
+
+```powershell
+uv run --frozen python -m pytest tests -q -p no:cacheprovider
+node tools/hosted_ui_harness.mjs --diary-only --typecheck --out ../dist/qa-manual-diary-139-final
+node tools/hosted_ui_harness.mjs --emotion-only --typecheck --out ../dist/qa-mood-manual-diary-regression-139
+```
+
 ## 1.3.9 Emotion Analysis Interval
 
 The emotion tab's tone-sensing module exposes a 10..3600-second integer input

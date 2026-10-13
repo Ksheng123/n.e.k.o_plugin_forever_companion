@@ -59,7 +59,11 @@ def test_design_timer_line_matches_decorator_seconds():
     stale: list[str] = []
     for timer_id, seconds in timers.items():
         # 只查提到"轮询"的 timer 说明行；用 \n 锚定行首避免命中行中间
-        lines = [ln for ln in design.splitlines() if "timer" in ln.lower() and "轮询" in ln]
+        lines = [
+            ln for ln in design.splitlines()
+            if "timer" in ln.lower() and "轮询" in ln and timer_id in ln
+        ]
+        assert lines, f"DESIGN.md 缺少 {timer_id} 的轮询节奏说明"
         for line in lines:
             nums = [int(n) for n in re.findall(r"每\s*(\d+)\s*秒", line)]
             for num in nums:
@@ -109,15 +113,18 @@ def _state_number(name: str) -> float:
 
 
 def test_readme_review_timeout_matches_constant():
-    """README 承诺的"成文最长等多久"必须等于 _HOST_LLM_TIMEOUT_REVIEW_SEC。
-
-    1.3.2 把超时从 urllib 里写死的 15 秒提成按通道的常量（成文 25 秒），README 那句
-    "模型调用最长 N 秒"是用户判断"点这一篇要让后台停多久"的依据。改了常量不改文案
-    就是显示层说谎——与 timer 秒数同一类，进同一道门。
-    """
+    """自动成文仍使用常规 tick 的超时，手动成文另有独立期限。"""
     timeout = _state_number("_HOST_LLM_TIMEOUT_REVIEW_SEC")
     text = README_PATH.read_text(encoding="utf-8")
     claims = {float(n) for n in re.findall(r"模型调用最长\s*(\d+(?:\.\d+)?)\s*秒", text)}
     assert claims, "README 里找不到「模型调用最长 N 秒」的承诺句（措辞变了要同步本门）"
     assert claims == {timeout}, f"README 写 {sorted(claims)} 秒，常量 _HOST_LLM_TIMEOUT_REVIEW_SEC 是 {timeout} 秒"
+
+
+def test_readme_manual_diary_deadlines_match_constants():
+    text = README_PATH.read_text(encoding="utf-8")
+    claims = re.findall(r"每次最多等\s*(\d+)\s*秒、总期限\s*(\d+)\s*秒", text)
+    assert claims, "README 缺少手动成文的每次与总期限"
+    expected = (_state_number("_MANUAL_DIARY_ATTEMPT_SEC"), _state_number("_MANUAL_DIARY_TOTAL_SEC"))
+    assert {(float(attempt), float(total)) for attempt, total in claims} == {expected}
 

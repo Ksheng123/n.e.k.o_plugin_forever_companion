@@ -6,9 +6,9 @@ import { Button, Card, EmptyState, Tabs, useToast } from "@neko/plugin-ui"
 import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
 import { BOOK_STYLES } from "./styles_book"
 import type {
-  DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, ReviewArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
+  DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, JournalWrite, ReviewArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
 } from "./types"
-import { fragmentKindKey, journalTrendKey, toneLabelKey } from "./utils"
+import { diaryWriteError, fragmentKindKey, journalTrendKey, toneLabelKey } from "./utils"
 
 type CatalogView = { query: string; page: number }
 
@@ -22,6 +22,9 @@ export function DiaryPane(props: {
   // 面板据此在书架末尾画一根横放书脊，点开即只读翻阅
   journalArchiveBrief?: JournalArchiveBrief
   invitePending?: boolean
+  journalWrite?: JournalWrite
+  journalSubmitting?: boolean
+  reviewSubmitting?: boolean
   lanlan?: string
   // 用 types.ts 的 ReviewBrief（含 1.2.3 的 writing/last_result）：内联复刻一份
   // 窄类型会让 reviewBrief.writing 过不了 hosted-tsx 的类型检查（TS2339）
@@ -29,7 +32,6 @@ export function DiaryPane(props: {
   // 档案室（1.3.0）：活架攒满下架的旧卷宗合档——与藏书阁同款：概览进轮询，
   // 全量按需拉取；面板据此在档案架末尾画那只档案盒，点开即只读翻阅
   reviewArchiveBrief?: ReviewArchiveBrief
-  onClearDiary: () => void
   onDeleteFragment: (ts: string) => void
   onLoadJournal: () => Promise<JournalPage[]>
   // 失败回 null（区别于"真的还没有合订本"的空数组）：面板据此弹错，不再静默
@@ -40,14 +42,14 @@ export function DiaryPane(props: {
   // 档案室全量拉取（失败回 null 区别于真空列表，面板据此弹错不静默）
   onLoadReviewArchive: () => Promise<ReviewEntry[] | null>
   onWriteReviewNow: () => void
-  onClearReview: () => void
   settingsChildren?: any
 }) {
   const {
     t, diary, diaryTotal, fragmentTotal, journalIndex, journalArchiveBrief, invitePending, lanlan, reviewBrief,
     reviewArchiveBrief,
-    onClearDiary, onDeleteFragment, onLoadJournal, onLoadJournalArchive, onLoadMoreDiary, onInviteJournal,
-    onLoadReview, onLoadReviewArchive, onWriteReviewNow, onClearReview, settingsChildren,
+    journalWrite, journalSubmitting, reviewSubmitting,
+    onDeleteFragment, onLoadJournal, onLoadJournalArchive, onLoadMoreDiary, onInviteJournal,
+    onLoadReview, onLoadReviewArchive, onWriteReviewNow, settingsChildren,
   } = props
   const toast = useToast()
 
@@ -288,9 +290,6 @@ export function DiaryPane(props: {
                           .replace("{self}", String(diaryTotal - fragmentTotal))
                           .replace("{auto}", String(fragmentTotal))}
                       </span>
-                      <Button tone="danger" onClick={onClearDiary}>
-                        {t("actions.clear_diary.label", { defaultValue: "清空时光日记" })}
-                      </Button>
                     </div>
                     <TimelineView t={t} items={timeline} onDelete={onDeleteFragment} />
                     {fullDiary === null || diaryHasMore ? (
@@ -326,12 +325,20 @@ export function DiaryPane(props: {
                   <span className="tm-journal-actions">
                     {/* 刷新按钮已移除（1.2.5）：书页指纹（页码:段数:末笔时刻）随 5s
                         轮询自动检测，新页/续写都会自动重拉整本，无需手动刷新 */}
-                    <Button tone="primary" onClick={onInviteJournal}>
-                      {t("panel.journal.invite", { defaultValue: "邀请写日记" })}
+                    <Button tone="primary" onClick={onInviteJournal} disabled={journalSubmitting || !!(journalWrite && journalWrite.writing)}>
+                      {journalSubmitting || (journalWrite && journalWrite.writing)
+                        ? t("panel.review.writing", { defaultValue: "生成中…" })
+                        : t("panel.journal.invite", { defaultValue: "邀请写日记" })}
                     </Button>
                   </span>
                 </div>
-                {invitePending ? (
+                {journalWrite && journalWrite.writing ? (
+                  <div className="tm-derived">
+                    {t("panel.journal.writingHint", { defaultValue: "正在根据近期素材生成个人日记，保存后会显示在这里。" })}
+                  </div>
+                ) : journalWrite && journalWrite.last_result && !journalWrite.last_result.written ? (
+                  <div className="tm-derived">{diaryWriteError(journalWrite.last_result, t)}</div>
+                ) : invitePending ? (
                   <div className="tm-derived">
                     {t("panel.journal.invitePending", { defaultValue: "邀请已发送，等待角色决定是否写作。新内容保存后会显示在这里。" })}
                   </div>
@@ -394,14 +401,11 @@ export function DiaryPane(props: {
                     <Button
                       tone="primary"
                       onClick={onWriteReviewNow}
-                      disabled={reviewLoading || !!(reviewBrief && reviewBrief.writing)}
+                      disabled={reviewSubmitting || reviewLoading || !!(reviewBrief && reviewBrief.writing)}
                     >
-                      {reviewBrief && reviewBrief.writing
+                      {reviewSubmitting || (reviewBrief && reviewBrief.writing)
                         ? t("panel.review.writing", { defaultValue: "生成中…" })
                         : t("panel.review.writeNow", { defaultValue: "立即生成" })}
-                    </Button>
-                    <Button tone="danger" onClick={onClearReview}>
-                      {t("panel.review.clear", { defaultValue: "清空" })}
                     </Button>
                   </span>
                 </div>
@@ -415,7 +419,7 @@ export function DiaryPane(props: {
                     清空（write_review_now 的作废逻辑），警示行随之消失 */}
                 {reviewBrief && !reviewBrief.writing && reviewBrief.last_result && !reviewBrief.last_result.written ? (
                   <div className="tm-derived">
-                    {t("panel.review.lastFailed", { defaultValue: "上次生成失败，素材已保留，可稍后重试。" })}
+                    {diaryWriteError(reviewBrief.last_result, t)}
                   </div>
                 ) : null}
                 {visibleReviewArchive ? (

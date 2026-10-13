@@ -27,6 +27,7 @@ from ..core.fragments import (
     recall_fragments,
     should_nudge_fight,
 )
+from ..core.journal import build_journal_prompt, journal_materials, journal_write
 from ..core.review import (
     append_review,
     build_review_prompt,
@@ -60,6 +61,8 @@ from ..core.state import (
     _HOST_LLM_MAX_TOKENS_REVIEW,
     _HOST_LLM_TIMEOUT_FRAGMENT_SEC,
     _HOST_LLM_TIMEOUT_REVIEW_SEC,
+    _MANUAL_DIARY_ATTEMPT_SEC,
+    _MANUAL_DIARY_TOTAL_SEC,
     _PROACTIVE_PAUSE_ACTIONS,
     _REVIEW_DEFAULT_DAYS,
     _REVIEW_DEFAULT_SLOT,
@@ -75,6 +78,7 @@ from ..core.stats import record_milestone
 from ..services import host_llm as _host_llm
 from ..services.tone_slot import (
     _channel_mode,
+    _exc_shape,
     _parse_tone_result,
     _post_chat_completion,
     _resolve_tone_slot,
@@ -188,11 +192,13 @@ class SensesMixin:
         return _resolve_tone_slot(core_cfg, slot, _seen)
 
     def _post_chat_completion(
-        self, base_url: str, api_key: str, model: str, prompt: str, *, timeout_sec: float = 15.0
+        self, base_url: str, api_key: str, model: str, prompt: str, *, timeout_sec: float = 15.0,
+        raise_timeout: bool = False,
     ) -> str | None:
-        """同步直连 OpenAI 兼容 /chat/completions（逻辑在 tone_slot.py）；任何失败 → None。"""
+        """直连薄委托：默认失败 → None，手动路径可要求回传明确超时。"""
         return _post_chat_completion(
-            base_url, api_key, model, prompt, timeout_sec=timeout_sec, logger=self.logger
+            base_url, api_key, model, prompt, timeout_sec=timeout_sec, logger=self.logger,
+            raise_timeout=raise_timeout,
         )
 
     def _parse_tone_result(self, raw: str) -> tuple[str, float] | None:
@@ -247,6 +253,7 @@ class SensesMixin:
         timeout_sec: float,
         max_completion_tokens: int,
         call_type: str = "",
+        raise_timeout: bool = False,
     ) -> str | None:
         """薄委托：host_llm.chat_via_host（用宿主客户端跑一次单轮补全）。"""
         return await _host_llm.chat_via_host(
@@ -256,6 +263,7 @@ class SensesMixin:
             max_completion_tokens=max_completion_tokens,
             call_type=call_type,
             logger=self.logger,
+            raise_timeout=raise_timeout,
         )
 
     async def _resolve_channel_endpoint(
@@ -381,8 +389,9 @@ class SensesMixin:
         timeout_sec: float,
         max_completion_tokens: int,
         call_type: str,
+        raise_timeout: bool = False,
     ) -> str | None:
-        """发一次单轮补全并按 transport 分派；失败 → None（调用方按降级处理）。"""
+        """按 transport 分派；默认失败 → None，raise_timeout 保留明确超时原因。"""
         if resolved.get("transport") == _CHANNEL_TRANSPORT_HOST:
             return await self._chat_via_host(
                 resolved,
@@ -390,11 +399,13 @@ class SensesMixin:
                 timeout_sec=timeout_sec,
                 max_completion_tokens=max_completion_tokens,
                 call_type=call_type,
+                **({"raise_timeout": True} if raise_timeout else {}),
             )
         return await asyncio.to_thread(
             self._post_chat_completion,
             resolved["base_url"], resolved["api_key"], resolved["model"], prompt,
             timeout_sec=timeout_sec,
+            **({"raise_timeout": True} if raise_timeout else {}),
         )
 
     # 已迁入 emotion_sense.py（A5 服务化第 1 批），同名薄委托
@@ -678,7 +689,8 @@ class SensesMixin:
         面板「立即写一篇」受理预检与 _review_compose 共用本函数——口径唯一，
         不会两处漂移。返回 (是否放行, 原因, 槽位解析结果)：原因沿用历史词表
         （disabled / not_enough_material / slot_unresolved / review_due 的
-        no_activity 等），未放行时解析结果为 None。
+        no_activity 等）；手动写作额外区分预算、熔断和存储错误。
+        未放行时解析结果为 None。
         门槛先于槽位休眠判定：素材不足/未到期时无论槽位状态都该报"未到节奏"，
         面板调试时才不会被休眠日志误导。
         """
@@ -687,6 +699,8 @@ class SensesMixin:
         if force:
             if not can_force_write(shard.review_stats):
                 return False, "not_enough_material", None
+            if not self._store_ready:
+                return False, "persist_failed", None
         else:
             due, reason = review_due(
                 shard.review_stats,
@@ -707,16 +721,173 @@ class SensesMixin:
                     slot, _slot_dormancy_hint(core_cfg, slot),
                 )
             return False, "slot_unresolved", None
+        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
+        if self._channel_break_open(shard.lanlan, "review", _channel_route(slot, resolved)):
+            return False, "channel_rejected" if force else "slot_unresolved", None
+        if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
+            return False, "budget_exhausted" if force else "slot_unresolved", None
         return True, "", resolved
 
+    async def _compose_manual_document(
+        self, lanlan: str, shard: _LanlanShard, resolved: JsonObject, prompt: str, *, call_type: str
+    ) -> tuple[JsonObject, str]:
+        """At most two real attempts; never turn a transport failure into invented text."""
+        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
+        route = _channel_route(slot, resolved)
+        deadline = time.monotonic() + _MANUAL_DIARY_TOTAL_SEC
+        reason = "request_timeout"
+        for attempt in range(2):
+            remaining = min(_MANUAL_DIARY_ATTEMPT_SEC, deadline - time.monotonic())
+            if remaining <= 0:
+                return {}, reason
+            if self._channel_break_open(lanlan, "review", route):
+                return {}, "channel_rejected"
+            if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
+                return {}, "budget_exhausted"
+            await self._agent_tier_spend(lanlan, shard, slot)
+            remaining = min(_MANUAL_DIARY_ATTEMPT_SEC, deadline - time.monotonic())
+            if remaining <= 0:
+                return {}, "request_timeout"
+            started = time.monotonic()
+            timed_out = False
+            try:
+                raw = await asyncio.wait_for(
+                    self._channel_chat(
+                        resolved, prompt, timeout_sec=remaining,
+                        max_completion_tokens=_HOST_LLM_MAX_TOKENS_REVIEW,
+                        call_type=call_type,
+                        raise_timeout=True,
+                    ),
+                    timeout=remaining,
+                )
+            except TimeoutError:
+                raw = None
+                timed_out = True
+            # A slow response does not establish that the server rejected the route.
+            if not timed_out:
+                self._channel_break_note(lanlan, "review", route, ok=raw is not None)
+            document = parse_review_document(raw or "")
+            if document.get("text"):
+                return document, ""
+            reason = "request_timeout" if timed_out else ("request_failed" if raw is None else "invalid_reply")
+            self.logger.warning(
+                "manual diary compose failed: channel={} route={} attempt={} reason={} elapsed_ms={} len={}",
+                call_type, route, attempt + 1, reason,
+                round((time.monotonic() - started) * 1000), len(raw or ""),
+            )
+            if raw is not None:
+                prompt += "\n上一次未返回有效正文，请直接返回包含非空 text 的完整 JSON 日记。"
+        return {}, reason
+
+    async def _journal_write_gate(
+        self, lanlan: str, shard: _LanlanShard, material: JsonObject
+    ) -> tuple[bool, str, Any]:
+        if not self._journal_enabled(shard):
+            return False, "disabled", None
+        if not self._store_ready:
+            return False, "persist_failed", None
+        if not material.get("items") and not material.get("sample_turns"):
+            return False, "not_enough_material", None
+        resolved, slot, _ = await self._resolve_channel_endpoint(
+            self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT,
+        )
+        if resolved is None:
+            return False, "slot_unresolved", None
+        if self._channel_break_open(lanlan, "review", _channel_route(slot, resolved)):
+            return False, "channel_rejected", None
+        if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
+            return False, "budget_exhausted", None
+        return True, "", resolved
+
+    async def _manual_journal_material(self, lanlan: str, shard: _LanlanShard) -> JsonObject:
+        samples = await self._collect_review_sample_turns(shard, lanlan)
+        return journal_materials(shard.journal, shard.diary, samples)
+
+    async def _maybe_write_journal(
+        self, lanlan: str, shard: _LanlanShard, material: JsonObject
+    ) -> tuple[bool, str]:
+        if lanlan in self._journal_writing:
+            return False, "in_flight"
+        self._journal_writing.add(lanlan)
+        try:
+            passed, reason, resolved = await self._journal_write_gate(lanlan, shard, material)
+            if not passed:
+                return False, reason
+            persona = ""
+            try:
+                payload = await self._proactive_http(
+                    "GET", "/api/characters", headers={"Accept-Language": "zh-CN"},
+                )
+            except Exception:  # noqa: BLE001 - recent replies still provide a voice reference
+                payload = None
+            characters = payload.get("猫娘") if isinstance(payload, dict) else None
+            character = characters.get(lanlan) if isinstance(characters, dict) else None
+            if isinstance(character, dict) and isinstance(character.get("system_prompt"), str):
+                persona = character["system_prompt"]
+            document, reason = await self._compose_manual_document(
+                lanlan, shard, resolved, build_journal_prompt(material, lanlan, persona),
+                call_type="plugin_journal_compose",
+            )
+            if not document:
+                return False, reason
+            # Writing may have been disabled while the model was running.
+            if not self._journal_enabled(shard):
+                return False, "disabled"
+            if not self._store_ready:
+                return False, "persist_failed"
+            previous = list(shard.journal)
+            shard.journal, _page, _tail, evicted = journal_write(
+                shard.journal, document["text"], True,
+                affect=self._current_affect(shard)[0], title=document.get("title") or "",
+            )
+            result = await self._save_shard_journal(lanlan, shard)
+            if isinstance(result, Err):
+                shard.journal = previous
+                return False, "persist_failed"
+            archive = await self._append_journal_archive(lanlan, shard, evicted)
+            if isinstance(archive, Err):
+                self.logger.warning("manual journal archive save failed for {}", lanlan)
+            shard.stats = record_milestone(shard.stats, "first_journal")
+            await self._save_shard_stats(lanlan, shard)
+            self.logger.info("personal journal composed for {} (source=manual)", lanlan)
+            return True, "written"
+        finally:
+            self._journal_writing.discard(lanlan)
+
+    async def _drain_pending_journal_writes(self) -> None:
+        for lanlan, shard in list(self._shards.items()):
+            material = shard.pending_journal_write
+            if material is None or lanlan in self._journal_writing:
+                continue
+            shard.pending_journal_write = None
+            try:
+                written, reason = await self._maybe_write_journal(lanlan, shard, material)
+            except Exception as exc:  # noqa: BLE001 - queued failures must reach the panel
+                self.logger.warning("queued journal compose failed for {}: {}", lanlan, _exc_shape(exc))
+                written, reason = False, "compose_raised"
+            if reason == "in_flight":
+                shard.pending_journal_write = material
+                continue
+            shard.journal_write_result = {"ts": time.time(), "written": written, "reason": reason}
+            if reason == "slot_unresolved":
+                status = await self._channel_dormancy(
+                    True, self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT,
+                    lanlan=lanlan, channel="review", shard=shard,
+                )
+                shard.journal_write_result["dormant_reason"] = status.get("dormant_reason") or "no_model"
+
     async def _maybe_write_review(self, lanlan: str, shard: _LanlanShard, *, force: bool = False) -> tuple[bool, str]:
-        """我的日记成文唯一入口（tick 自动 / tick 队列消费 / 调试入口都走这里）。
+        """我的日记成文唯一入口（常规 tick 自动 / 独立写作定时器 / 调试入口）。
 
         在飞锁（1.2.3）：同角色成文期间再次进入直接返回 False, "in_flight"——
         队列写与自动双门槛写、调试强写不能对同一角色并发跑两趟模型、互踩
         "追加+素材清零"的快照。"in_flight" 由消费方（_drain_pending_review_writes）
         按"放回队列下趟重试"处理，不记成失败。
         """
+        if not force and (
+            shard.pending_review_write or shard.pending_journal_write is not None or lanlan in self._journal_writing
+        ):
+            return False, "manual_writing"
         if lanlan in self._review_writing:
             return False, "in_flight"
         self._review_writing.add(lanlan)
@@ -738,27 +909,36 @@ class SensesMixin:
         slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
         route = _channel_route(slot, resolved)
         if self._channel_break_open(lanlan, "review", route):
-            # 熔断中不再发请求。原因沿用 slot_unresolved：面板那侧本来就按这个码
-            # 去问状态灯，灯现在会回 rejected——一份判据两处用，不再新增原因码
-            return False, "slot_unresolved"
+            # 自动路径沿用旧码，手动路径给出具体失败原因。
+            return False, "channel_rejected" if force else "slot_unresolved"
         if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
-            # 今日 agent 档额度用完：同上，让灯去说具体是哪一档（ignore_pace 的理由见
-            # _agent_tier_gate 注释——成文自带双门槛与在飞锁，不需要再被限速一次）
-            return False, "slot_unresolved"
+            # 成文自带素材门槛与在飞锁，只查预算，不重复施加限速地板。
+            return False, "budget_exhausted" if force else "slot_unresolved"
         # 成文素材：累计统计 + 最近几轮对话摘样（一次性拉取宿主 recent 窗口）
         sample_turns = await self._collect_review_sample_turns(shard, lanlan)
         prompt = build_review_prompt(shard.review_stats, sample_turns=sample_turns)
-        await self._agent_tier_spend(lanlan, shard, slot)
-        raw = await self._channel_chat(
-            resolved,
-            prompt,
-            timeout_sec=_HOST_LLM_TIMEOUT_REVIEW_SEC,
-            max_completion_tokens=_HOST_LLM_MAX_TOKENS_REVIEW,
-            call_type="plugin_review_compose",
-        )
-        self._channel_break_note(lanlan, "review", route, ok=raw is not None)
-        document = parse_review_document(raw or "")
+        if force:
+            document, reason = await self._compose_manual_document(
+                lanlan, shard, resolved, prompt, call_type="plugin_review_compose",
+            )
+            if not document:
+                return False, reason
+            raw = None
+        else:
+            await self._agent_tier_spend(lanlan, shard, slot)
+            raw = await self._channel_chat(
+                resolved, prompt, timeout_sec=_HOST_LLM_TIMEOUT_REVIEW_SEC,
+                max_completion_tokens=_HOST_LLM_MAX_TOKENS_REVIEW,
+                call_type="plugin_review_compose",
+            )
+            self._channel_break_note(lanlan, "review", route, ok=raw is not None)
+            document = parse_review_document(raw or "")
         text = str(document.get("text") or "")
+        if force:
+            if not self._review_enabled(shard):
+                return False, "disabled"
+            if not self._store_ready:
+                return False, "persist_failed"
         if not text:
             # 留痕分级（1.2.2 审查轮）：面板提示"稍后再试（详见插件日志）"，
             # 过去这条路径完全静默（请求失败也只有 debug 级）——让用户查无可查。
@@ -820,18 +1000,19 @@ class SensesMixin:
         shard.stats = record_milestone(shard.stats, "first_review")
         await self._save_shard_stats(lanlan, shard)
         self.logger.info(
-            "review composed for {} (turns={}, entries={})", lanlan, record["turns"], len(shard.review)
+            "review composed for {} (turns={}, entries={}, source={})",
+            lanlan, record["turns"], len(shard.review), "manual" if force else "auto",
         )
         return True, "written"
 
     async def _drain_pending_review_writes(self) -> None:
-        """消费面板「立即写一篇」的排队请求（1.2.3，tick 链路头部调用）。
+        """独立 diary_write_tick 消费面板「立即写一篇」的排队请求。
 
         成文是 5～20 秒的模型慢操作，过去挂在面板入口的请求-响应链上：
         点击即无反馈干等、浏览器 30s 与服务端 30s 压线、关面板断连还会把
         写了一半的篇目连同落盘一起取消。现在入口只做受理（标记 pending、秒回），
-        真正的成文由本方法在下一趟 tick 起跑，结果写进 shard.review_write_result
-        供面板轮询取用。放在 tick 的 enabled 拦截之前："我的日记"只认
+        真正的成文由本方法在下一趟写作定时器起跑，结果写进 shard.review_write_result
+        供面板轮询取用。独立于常规 tick 的 enabled 拦截："我的日记"只认
         [review].enabled，不受潮汐总开关 fail-closed 牵连（否则默认安装态
         队列永远不会被消费）。同角色成文在飞时跳过本趟、pending 留在队里下趟重试；
         成文抛出未预期异常时也必须写一条失败结论（1.2.4），绝不让排队请求静默消失。
@@ -849,9 +1030,7 @@ class SensesMixin:
                 # tick 顶层，结果位永远不写——用户点了"立即写一篇"得到"已开始写"，
                 # 之后按钮变回可点、不弹任何东西，这一篇石沉大海（1.2.2 的同步链路
                 # 至少还会以 api.call 失败的形式弹出来）。兜住并如实写失败结论。
-                self.logger.warning(
-                    "queued review compose raised for {}: {}: {}", lanlan, type(exc).__name__, exc
-                )
+                self.logger.warning("queued review compose raised for {}: {}", lanlan, _exc_shape(exc))
                 written, reason = False, "compose_raised"
             if not written and reason == "in_flight":
                 # 门后竞态（调试入口刚好抢先进飞）：放回队列，不作失败上报
@@ -862,6 +1041,12 @@ class SensesMixin:
                 "written": written,
                 "reason": reason,
             }
+            if reason == "slot_unresolved":
+                status = await self._channel_dormancy(
+                    True, self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT,
+                    lanlan=lanlan, channel="review", shard=shard,
+                )
+                shard.review_write_result["dormant_reason"] = status.get("dormant_reason") or "no_model"
 
     async def _collect_review_sample_turns(
         self, shard: _LanlanShard, lanlan: str

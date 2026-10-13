@@ -541,10 +541,12 @@ def _channel_route(slot: str, resolved: JsonObject | None) -> str:
 # 等多久"。输出上限目前只有宿主管线用得上（插件那份 urllib 请求体没带
 # max_completion_tokens，直连侧沿用服务商默认）；要收紧直连得连请求体一起改，别只改这里。
 # 上限不是等待时长，直连侧原来是 urlopen 里写死的 15 秒；成文按文档实测 5~20 秒，
-# 15 秒会掐掉正常一篇，给到 25 秒。再往上不给：成文是 await 在后台轮询里的，
-# 超时会顺延同拍的用户消息注入/语气感知/碎片捕获（README「为什么慢操作排队」）。
+# 自动成文沿用 25 秒，仍在常规轮询尾部等待。手动成文在独立 SDK 定时线程等待，
+# 单次 45 秒、总期限 90 秒，为慢回复与重试留出时间，不占用消息与心情分析轮询。
 _HOST_LLM_TIMEOUT_FRAGMENT_SEC = 15.0
 _HOST_LLM_TIMEOUT_REVIEW_SEC = 25.0
+_MANUAL_DIARY_ATTEMPT_SEC = 45.0
+_MANUAL_DIARY_TOTAL_SEC = 90.0
 _HOST_LLM_MAX_TOKENS_FRAGMENT = 400
 _HOST_LLM_MAX_TOKENS_REVIEW = 1200
 # 宿主 assist 管理簿：provider key → core_config 里的明文 key 字段名
@@ -740,6 +742,8 @@ class _LanlanShard:
         "last_extreme_invite_ts",
         "pending_review_write",
         "review_write_result",
+        "pending_journal_write",
+        "journal_write_result",
     )
 
     def __init__(self) -> None:
@@ -764,6 +768,8 @@ class _LanlanShard:
         # 都只存内存：插件重启即弃，面板写作中态随之消失，用户可重新点击
         self.pending_review_write = 0.0
         self.review_write_result: JsonObject | None = None
+        self.pending_journal_write: JsonObject | None = None
+        self.journal_write_result: JsonObject | None = None
         # 相处统计（1.1.0，stats.py）：按天聚合的长期累计（徽章/热力图/月报），
         # 只增不清零、不受 [review].enabled 闸控制，纯本地纯统计零模型开销
         self.stats: JsonObject = {}

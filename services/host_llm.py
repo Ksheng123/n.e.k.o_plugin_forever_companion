@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..core.state import _CHANNEL_TRANSPORT_HOST, _TONE_SLOT_PREFIXES
-from .tone_slot import _exc_shape
+from .tone_slot import _exc_shape, _is_request_timeout
 
 JsonObject = dict[str, Any]
 
@@ -91,8 +91,9 @@ async def chat_via_host(
     max_completion_tokens: int,
     call_type: str = "",
     logger: Any = None,
+    raise_timeout: bool = False,
 ) -> str | None:
-    """用宿主客户端跑一次单轮补全；任何失败 → None（调用方按降级处理）。
+    """用宿主客户端跑一次单轮补全；默认失败 → None（调用方按降级处理）。
 
     与直连的分工：本函数只在 resolve_host_slot 给出端点之后才被调用，端点与
     客户端身份都由宿主决定，所以这里的"失败"只可能是请求层面的（超时/上游
@@ -100,6 +101,7 @@ async def chat_via_host(
     身份），返回 None 记一次失败即可。
     失败日志沿用 tone_slot 的脱敏契约：只记异常类型/状态码，绝不记 str(exc)
     （自定义端点可能把凭据拼进 URL）。
+    手动写作传 raise_timeout=True 时，明确超时改抛脱敏 TimeoutError；取消仍向上传播。
     """
     try:
         from utils.llm_client import create_chat_llm_async
@@ -122,6 +124,8 @@ async def chat_via_host(
         content = getattr(resp, "content", None)
     except Exception as exc:  # noqa: BLE001 - 降级但留痕
         _warn(logger, f"host pipeline chat failed: {_exc_shape(exc)}")
+        if raise_timeout and _is_request_timeout(exc):
+            raise TimeoutError() from None
         return None
     finally:
         if llm is not None:

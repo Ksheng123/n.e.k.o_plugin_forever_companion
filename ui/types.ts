@@ -216,7 +216,14 @@ export type ReviewBrief = {
   // 「立即写一篇」排队成文（1.2.3）：writing=排队中/在飞；last_result 是队列
   // 成文的成败结论（内存即弃、只留最近一次），面板按 ts 去重弹一次完成 toast
   writing?: boolean
-  last_result?: { ts?: number; written?: boolean; reason?: string } | null
+  last_result?: DiaryWriteResult | null
+}
+
+export type DiaryWriteResult = { ts?: number; written?: boolean; reason?: string; dormant_reason?: string }
+
+export type JournalWrite = {
+  writing?: boolean
+  last_result?: DiaryWriteResult | null
 }
 
 // 模型通道状态灯（dashboard channel_status）：dormant_reason ∈ ""(正常) /
@@ -309,6 +316,7 @@ export type State = {
   review_archive_brief?: ReviewArchiveBrief
   // 个人日记邀请挂起态（1.2.3）：递过邀请、她还没落笔
   journal_invite_pending?: boolean
+  journal_write?: JournalWrite
   lanlan?: string
   lanlan_list?: LanlanItem[]
   tone_slot_options?: ToneSlotOption[]

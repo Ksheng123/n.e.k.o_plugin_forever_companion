@@ -890,6 +890,19 @@ class MoodActionsMixin:
             return Err(SdkError("情绪系统未开启"))
         if not has_journal_content(events, thoughts, feelings, extra):
             return Err(SdkError("journal is empty: fill at least one of events/thoughts/feelings/extra"))
+        if shard.pending_journal_write is not None or lanlan in self._journal_writing:
+            return Err(SdkError("个人日记正在生成，请等待完成后再写"))
+        self._journal_writing.add(lanlan)
+        try:
+            return await self._write_journal_entry(
+                lanlan, shard, events, thoughts, feelings, extra, new_page, title,
+            )
+        finally:
+            self._journal_writing.discard(lanlan)
+
+    async def _write_journal_entry(
+        self, lanlan, shard, events, thoughts, feelings, extra, new_page, title
+    ):
         # 四栏拼装成带引导小标题的成段日记；段落间空行分开，读起来是一篇连贯的日记
         body = assemble_journal_entry(events, thoughts, feelings, extra)
         # 页眉的好感度参考值：落笔瞬间的连续心情（读取时已惰性衰减），只进页眉展示层

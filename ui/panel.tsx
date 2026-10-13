@@ -50,7 +50,7 @@ import {
 } from "./media"
 import type { GalleryMedia, MediaTask } from "./media"
 import type { DiaryItem, JournalPage, Heatmap, MonthReport, ReviewEntry, ReviewProgress } from "./types"
-import { unwrapCallResult, errorText } from "./utils"
+import { unwrapCallResult, errorText, diaryWriteError } from "./utils"
 
 export default function Panel(props: PluginSurfaceProps<State>) {
   const { actions, state, t } = props
@@ -120,6 +120,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [apBusy, setApBusy] = useState(false)
   // 设置页那枚「保存设置」在飞标记：它一趟按两摊（设置 + 外观），连点会重复写盘
   const [savingAll, setSavingAll] = useState(false)
+  const [journalSubmitting, setJournalSubmitting] = useState(false)
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const journalSubmitLock = useRef(false)
+  const reviewSubmitLock = useRef(false)
   // 时光页：相处统计的热力图/月报数据量大，进页时按需拉取（不随 5s 轮询）；
   // 切角色时清掉旧数据等下次进页重拉
   const [heatData, setHeatData] = useState<Heatmap | null>(null)
@@ -860,23 +864,6 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  async function onClearDiary() {
-    const ok = await confirmDialog({
-      title: t("actions.clear_diary.label", { defaultValue: "清空时光日记" }),
-      message: t("actions.clear_diary.confirm", { defaultValue: "确定清空当前角色的时光日记吗？手记和对话片段都会删除，且无法恢复。" }),
-      tone: "danger",
-      ...confirmLabels,
-    })
-    if (!ok) return
-    try {
-      await props.api.call("clear_diary")
-      await props.api.refresh()
-      toast.success(t("panel.diary.cleared", { defaultValue: "时光日记已清空" }))
-    } catch (err) {
-      toast.error(errorText(err, t))
-    }
-  }
-
   async function onDeleteFragment(ts: string) {
     const ok = await confirmDialog({
       title: t("actions.delete_diary_item.label", { defaultValue: "删除这条片段" }),
@@ -936,15 +923,22 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   }
 
   async function onInviteJournal() {
+    if (journalSubmitLock.current) return
+    journalSubmitLock.current = true
+    setJournalSubmitting(true)
     try {
       const payload = unwrapCallResult(await props.api.call("invite_journal", {}))
       await props.api.refresh()
       const r = (payload || {}) as Record<string, any>
-      // 四态文案全在前端按 invited/mode 码翻译（i18n 契约 1.3.0 第九轮）：
-      // 后端不再回人类可读 note，中文裸串不会短路 t()。传输拒收是真错误，
-      // 不能与"开关未开启"共用一条 info 软提示（1.2.4 语义不变）；
-      // respond（当面递到）/ read（冷却内悄悄补递）分文案（1.2.3 既定双态）
-      if (r.invited === false && r.mode === "failed") {
+      if (r.accepted) {
+        toast.info(t("panel.review.accepted", { defaultValue: "已加入生成队列，完成后会显示在这里" }))
+      } else if (r.reason === "already_writing") {
+        toast.info(t("panel.review.alreadyWriting", { defaultValue: "已有内容正在生成，请等待完成" }))
+      } else if (r.reason === "not_enough_material") {
+        toast.info(t("panel.journal.notEnoughMaterial", { defaultValue: "暂无可写素材，请先聊一轮，或积累新的时光日记记录。" }))
+      } else if (r.accepted === false) {
+        toast.error(diaryWriteError(r, t))
+      } else if (r.invited === false && r.mode === "failed") {
         toast.error(t("panel.journal.inviteFailed", { defaultValue: "邀请发送失败，消息通道可能正忙或不可用。请稍后重试。" }))
       } else if (r.invited === false) {
         toast.info(t("panel.journal.inviteOff", { defaultValue: "个人日记开关未开启，邀请未发送" }))
@@ -955,6 +949,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       }
     } catch (err) {
       toast.error(errorText(err, t))
+    } finally {
+      journalSubmitLock.current = false
+      setJournalSubmitting(false)
     }
   }
 
@@ -988,6 +985,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   }
 
   async function onWriteReviewNow() {
+    if (reviewSubmitLock.current) return
+    reviewSubmitLock.current = true
+    setReviewSubmitting(true)
     try {
       // 受理式入口（1.2.3）：后端秒回"已开始写"，真正的成文在后台一拍内起跑；
       // 成败结论经 dashboard review_brief.last_result 由下方 effect 弹完成 toast。
@@ -1006,20 +1006,14 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           turns: String(r.turns ?? 0),
           min_turns: String(r.min_turns ?? 10),
         }))
-      } else if (r.reason === "slot_unresolved") {
-        // 休眠原因复用新手向导通道卡的既有文案（零新增 key，1.md 既定）；熔断这一档
-        // 必须自己占一个分支——落到"槽位没配模型"上就把"被服务端拒了"说成了"你没配"
-        const why = r.dormant_reason === "free_route"
-          ? t("onboarding.channels.freeRoute", { defaultValue: "免费路由不支持直连" })
-          : r.dormant_reason === "rejected"
-            ? t("panel.channel.rejected", { defaultValue: "请求被拒绝 · 通道已暂停" })
-            : t("onboarding.channels.noModel", { defaultValue: "未配置模型" })
-        toast.info(why)
       } else {
-        toast.info(t("panel.review.writeFailed", { defaultValue: "生成失败，请稍后重试" }))
+        toast.error(diaryWriteError(r, t))
       }
     } catch (err) {
       toast.error(errorText(err, t))
+    } finally {
+      reviewSubmitLock.current = false
+      setReviewSubmitting(false)
     }
   }
 
@@ -1049,13 +1043,27 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     reviewResultSeen.current = result.ts
     if (result.written) {
       toast.success(t("panel.review.written", { defaultValue: "记录已生成" }))
-    } else if (result.reason === "persist_failed") {
-      toast.error(t("panel.review.persistFailed", { defaultValue: "内容已生成，但保存失败。素材已保留，可稍后重试。" }))
     } else {
-      toast.info(t("panel.review.writeFailed", { defaultValue: "生成失败，请稍后重试" }))
+      toast.error(diaryWriteError(result, t))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.review_brief && state.review_brief.last_result && state.review_brief.last_result.ts, state.lanlan])
+
+  const journalResultSeen = useRef<number>(0)
+  const journalResultRole = useRef<string | null>(null)
+  useEffect(() => {
+    const result = state.journal_write && state.journal_write.last_result
+    const role = state.lanlan || ""
+    if (journalResultRole.current !== role) {
+      journalResultRole.current = role
+      journalResultSeen.current = (result && result.ts) || 0
+      return
+    }
+    if (!result || !result.ts || journalResultSeen.current === result.ts) return
+    journalResultSeen.current = result.ts
+    if (result.written) toast.success(t("panel.review.written", { defaultValue: "记录已生成" }))
+    else toast.error(diaryWriteError(result, t))
+  }, [state.journal_write && state.journal_write.last_result && state.journal_write.last_result.ts, state.lanlan])
 
   // 重置全部数据（危险区）：原走 kit ActionButton，它的错误展示是内联裸串
   // （会把我们的稳定码直喷给用户），改受控 Button + errorText 翻译——确认文案
@@ -1071,23 +1079,6 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     try {
       await props.api.call("reset_all", {})
       await props.api.refresh()
-    } catch (err) {
-      toast.error(errorText(err, t))
-    }
-  }
-
-  async function onClearReview() {
-    const ok = await confirmDialog({
-      title: t("actions.clear_review.label", { defaultValue: "清空我的日记" }),
-      message: t("actions.clear_review.confirm", { defaultValue: "确定清空当前角色的我的日记吗？所有记录（含归档）和累计素材都会删除，且无法恢复。" }),
-      tone: "danger",
-      ...confirmLabels,
-    })
-    if (!ok) return
-    try {
-      await props.api.call("clear_review", {})
-      await props.api.refresh()
-      toast.success(t("panel.review.cleared", { defaultValue: "我的日记已清空" }))
     } catch (err) {
       toast.error(errorText(err, t))
     }
@@ -1410,17 +1401,18 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               lanlan={state.lanlan}
               reviewBrief={state.review_brief}
               reviewArchiveBrief={state.review_archive_brief}
-              onClearDiary={onClearDiary}
               onDeleteFragment={onDeleteFragment}
               onLoadJournal={onLoadJournal}
               onLoadJournalArchive={onLoadJournalArchive}
 
               onLoadMoreDiary={onLoadMoreDiary}
               onInviteJournal={onInviteJournal}
+              journalWrite={state.journal_write}
+              journalSubmitting={journalSubmitting}
+              reviewSubmitting={reviewSubmitting}
               onLoadReview={onLoadReview}
               onLoadReviewArchive={onLoadReviewArchive}
               onWriteReviewNow={onWriteReviewNow}
-              onClearReview={onClearReview}
               settingsChildren={(
                 <>
                   <DiarySettingsCard t={t} form={form} updateForm={updateForm} />

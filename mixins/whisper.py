@@ -520,6 +520,8 @@ class WhisperMixin:
         """
         if not self._journal_enabled(shard):
             return False, ""
+        if shard.pending_journal_write is not None or lanlan in self._journal_writing:
+            return False, ""
         interval = self._journal_int_cfg("interval_days", _JOURNAL_DEFAULT_INTERVAL_DAYS)
         due, _reason = journal_due(shard.journal, interval_days=interval)
         now = time.time()
@@ -645,7 +647,8 @@ class WhisperMixin:
                 epoch = parsed.timestamp()
                 if epoch > last_write_epoch:
                     last_write_epoch = epoch
-        return shard.last_journal_invite_ts > last_write_epoch
+        # Journal timestamps are stored to seconds; compare at that precision too.
+        return int(shard.last_journal_invite_ts) > last_write_epoch
 
     # ==========================================
     # 生日轻语（1.3.1）

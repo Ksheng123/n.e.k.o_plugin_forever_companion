@@ -243,6 +243,82 @@ def test_chat_via_host_empty_reply_degrades(monkeypatch, tm) -> None:
     ) is None
 
 
+def test_host_timeout_can_be_reported_without_leaking_response(monkeypatch, tm):
+    import pytest
+
+    api_timeout = type("APITimeoutError", (Exception,), {})
+    client = _FakeClient(exc=api_timeout("SECRET_REQUEST"))
+    _install_host(monkeypatch, api_cfg={}, client=client)
+    logs = []
+    logger = types.SimpleNamespace(warning=lambda message: logs.append(message))
+    with pytest.raises(TimeoutError):
+        run(host_llm(tm).chat_via_host(
+            {"model": "m", "base_url": "http://x", "api_key": ""},
+            "PRIVATE_MATERIAL", timeout_sec=1, max_completion_tokens=10,
+            logger=logger, raise_timeout=True,
+        ))
+    assert client.closed == 1
+    assert "APITimeoutError" in "\n".join(logs)
+    assert "SECRET_REQUEST" not in "\n".join(logs) and "PRIVATE_MATERIAL" not in "\n".join(logs)
+
+
+def test_direct_timeout_can_be_reported_to_manual_writer(monkeypatch, tm):
+    import urllib.request
+
+    import pytest
+
+    def timed_out(*_, **__):
+        raise TimeoutError("SECRET_ENDPOINT")
+
+    monkeypatch.setattr(urllib.request, "urlopen", timed_out)
+    with pytest.raises(TimeoutError) as error:
+        tm._post_chat_completion("http://x", "", "m", "PRIVATE", raise_timeout=True)
+    assert not str(error.value)
+
+
+def test_wrapped_direct_timeout_is_distinct_from_connection_failure(monkeypatch, tm):
+    import urllib.error
+    import urllib.request
+
+    import pytest
+
+    def timed_out(*_, **__):
+        raise urllib.error.URLError(TimeoutError("SECRET_ENDPOINT"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", timed_out)
+    assert tm._post_chat_completion("http://x", "", "m", "PRIVATE") is None
+    with pytest.raises(TimeoutError) as error:
+        tm._post_chat_completion("http://x", "", "m", "PRIVATE", raise_timeout=True)
+    assert not str(error.value)
+    assert not tm.services.tone_slot._is_request_timeout(urllib.error.URLError("connection refused"))
+
+
+def test_host_cancellation_closes_client_and_propagates(monkeypatch, tm):
+    class WaitingClient(_FakeClient):
+        async def ainvoke(self, prompt):
+            await asyncio.Event().wait()
+
+    client = WaitingClient()
+    _install_host(monkeypatch, api_cfg={}, client=client)
+
+    async def scenario():
+        task = asyncio.create_task(host_llm(tm).chat_via_host(
+            {"model": "m", "base_url": "http://x", "api_key": ""},
+            "PRIVATE", timeout_sec=1, max_completion_tokens=10, raise_timeout=True,
+        ))
+        await asyncio.sleep(0)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("host transport swallowed cancellation")
+
+    run(scenario())
+    assert client.closed == 1
+
+
 # ---------------------------------------------------------------------------
 # mode 归一化与通道分派
 # ---------------------------------------------------------------------------
@@ -659,10 +735,10 @@ def test_review_compose_stops_calling_once_fused(plugin_factory, tm) -> None:
     p._collect_review_sample_turns = collect
     p._chat_via_host = chat
     p._review_cfg["mode"] = "host"
-    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "compose_failed")
+    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "request_failed")
     assert run(p._maybe_write_review("default", shard, force=True))[0] is False
     assert len(calls) == 2
-    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "slot_unresolved")
+    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "channel_rejected")
     assert len(calls) == 2
 
 
@@ -794,7 +870,7 @@ def test_review_ignores_the_floor_but_not_the_budget(plugin_factory) -> None:
     # 再发一拍就用满 5 次；下一拍预算闸落下：成文一样安静，且回执让面板去问灯
     assert run(p._maybe_write_review("default", shard, force=True))[0] is True
     assert len(calls) == 3
-    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "slot_unresolved")
+    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "budget_exhausted")
     assert len(calls) == 3
 
 

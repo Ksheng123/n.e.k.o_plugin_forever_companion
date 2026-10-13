@@ -174,17 +174,17 @@ def test_review_copy_identifies_model_generation_not_character_writing() -> None
         assert "生成" in messages[key] and "邀请" not in messages[key], key
 
 
-def test_personal_journal_copy_identifies_optional_character_invitation() -> None:
+def test_personal_journal_copy_distinguishes_manual_generation_from_auto_invitation() -> None:
     messages = _locale("zh-CN")
     for key in ("panel.journal.invite", "actions.invite_journal.label"):
         assert "邀请" in messages[key] and "日记" in messages[key], key
     purpose = messages["panel.capintro.journal.purpose"]
-    assert "角色" in purpose and "决定是否" in purpose
+    assert "角色口吻" in purpose and "后台模型" in purpose and "直接生成" in purpose
     limit = messages["panel.capintro.journal.limit2"]
-    assert "不代替" in limit and "不保证" in limit
+    assert "自动邀请" in limit and "手动写作" in limit and "不再等待" in limit
     pending = messages["panel.journal.invitePending"]
     assert "邀请" in pending and "角色" in pending and "决定是否" in pending
-    assert "不保证" in messages["panel.journal.emptyDesc"]
+    assert "直接生成" in messages["panel.journal.emptyDesc"]
 
 
 @pytest.mark.parametrize("capability", ("tone_sense", "fragments", "review"))

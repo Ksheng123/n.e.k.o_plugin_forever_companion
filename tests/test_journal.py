@@ -334,17 +334,14 @@ def test_invite_gated_by_switches(plugin_factory) -> None:
     assert run(p._maybe_journal_invite("default", shard, force=True)) == (False, "")
 
 
-def test_invite_journal_entry_reports_mode(plugin_factory) -> None:
-    """面板入口四态码：respond 当面递到 / read 冷却内悄悄提醒（i18n 契约第九轮：
-    后端只回 invited/mode 码，文案由 panel.journal.invitedRespond/invitedQuiet 翻译）。"""
+def test_manual_journal_rejects_missing_material_without_an_invitation(plugin_factory) -> None:
     p = plugin_factory()
     run(p._ensure_shard("default"))
     res = run(p.invite_journal())
     v = res.value
-    assert v["invited"] is True and v["mode"] == "respond"
+    assert v["accepted"] is False and v["reason"] == "not_enough_material"
     assert "note" not in v, "面板可见文案不再由后端发人话句（tests/test_i18n_contract.py 钉死）"
-    res2 = run(p.invite_journal())
-    assert res2.value["invited"] is True and res2.value["mode"] == "read"
+    assert not p._pushed
 
 
 # ---------- 1.2.4 审查修复：递邀的提交结果必须看 ----------
@@ -359,11 +356,6 @@ def test_forced_invite_reports_transport_failure(plugin_factory) -> None:
     assert run(p._maybe_journal_invite("default", shard, force=True)) == (False, "failed")
     assert shard.last_journal_invite_ts == 0.0, "手动档失败要回滚水位，用户可以立刻重按"
     assert p._journal_invite_pending(shard) is False
-
-    v = run(p.invite_journal()).value
-    assert v["invited"] is False and v["mode"] == "failed"
-    assert "note" not in v, "失败语义由 mode=failed 码承载（面板 inviteFailed 支），不再发裸串"
-
 
 def test_periodic_invite_failure_keeps_watermark(plugin_factory) -> None:
     """tick 周期档传输拒收：如实报 failed，但水位不回滚——通道一直坏时
