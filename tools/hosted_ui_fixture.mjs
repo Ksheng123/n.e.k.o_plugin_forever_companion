@@ -9,7 +9,7 @@ const ACTIONS = [
   "get_stats", "clear_stats", "get_panel_gallery", "get_gallery_image",
   "set_panel_appearance", "gallery_add", "gallery_remove", "gallery_set_thumb",
   "set_capability", "set_capability_flags", "get_capability_intro",
-  "set_onboarding", "prune_lanlan",
+  "set_onboarding", "prune_lanlan", "lift_mood",
 ]
 
 function crc32(bytes) {
@@ -76,7 +76,7 @@ function calendarMonth(year, month) {
   return { year, month, label: `${year} / ${String(month).padStart(2, "0")}`, cells }
 }
 
-export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null, heat = "", diaryCase = "" } = {}) {
+export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null, heat = "", diaryCase = "", moodCase = "" } = {}) {
   const appearance = { bg_id: wallpaper === "none" ? "" : wallpaper === "video" ? "qa-video" : "qa-wallpaper", fill: "cover", position: "center", blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100, glass: 0, card_alpha: 0, text_weight: 100, motion: true }
   const palettes = {
     olive: [[191, 185, 125], [125, 167, 191]],
@@ -195,6 +195,24 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     capabilities: { master_enabled: !empty, hide_disabled_tools: false, capabilities },
     birthday: { date: "2000-10-02", set: true, keep_diary: true },
   }
+  if (moodCase) {
+    const started = Date.parse("2026-10-13T15:00:00Z") / 1000
+    state.mood = {
+      ...state.mood, active: true, action: "ebb_tide", started_at: started,
+      origin: "self", expires_at: started + 600,
+      reason: "<img src=x onerror=alert(1)>\n" + "LongUnbrokenReason".repeat(25),
+      history: Array.from({ length: 12 }, (_, index) => ({
+        ts: started - index * 3600, action: "ripple",
+        kind: ["choose", "switch", "release", "expire"][index % 4],
+        origin: ["self", "user", "self", "timer"][index % 4],
+        previous_action: index % 4 === 1 ? "shallow_reef" : "",
+        reason: `event-${index}-private`,
+      })),
+    }
+    if (moodCase === "legacy") { state.mood.origin = ""; state.mood.history = [] }
+    if (moodCase === "empty") { state.mood.active = false; state.mood.history = [] }
+    if (moodCase === "disabled") state.mood.system_enabled = false
+  }
   if (selectedHeat?.start) {
     const summary = state.stats_summary.summary
     summary.days_together = (Date.parse(selectedHeat.end) - Date.parse(selectedHeat.start)) / 86400000 + 2
@@ -222,7 +240,7 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     context: {
       plugin: { id: "forever_companion", name: "\u6c38\u8fdc\u7684\u966a\u4f34" },
       surface: { id: "main", kind: "panel", mode: "hosted-tsx", entry: "ui/panel.tsx", permissions: ["state:read", "config:read", "action:call"] },
-      state, actions: ACTIONS.map(id => ({ id, entry_id: id, label: translate(`actions.${id}.label`), refresh_context: true, confirm: id === "reset_all" ? translate("actions.reset.confirm") : false })),
+      state, actions: ACTIONS.map(id => ({ id, entry_id: id, label: translate(id === "lift_mood" ? "actions.liftMood.label" : `actions.${id}.label`), refresh_context: true, confirm: id === "reset_all" ? translate("actions.reset.confirm") : false })),
       entries: [], config: { schema: { type: "object", properties: {} }, value: {}, readonly: true }, warnings: [],
       locale, i18n: { locale, default_locale: "zh-CN", messages },
     },
@@ -357,6 +375,18 @@ export function installFixtureBridge(fixture) {
       throw new Error("persist_failed")
     }
     if (Object.hasOwn(window.qaResults, action)) return clone(window.qaResults[action])
+    if (action === "lift_mood") {
+      if (window.qaChangeMoodBeforeLift) {
+        window.qaChangeMoodBeforeLift = false
+        state.mood.started_at += 1
+      }
+      if (args.expected_lanlan !== state.lanlan || args.expected_started_at !== state.mood.started_at) throw new Error("mood_changed")
+      state.mood.history.unshift({ ts: Date.now() / 1000, kind: "release", origin: "user", action: state.mood.action })
+      state.mood.active = false
+      state.mood.action = state.mood.origin = state.mood.reason = ""
+      state.mood.started_at = 0
+      return { cleared: true }
+    }
     if (action === "get_panel_gallery") return { items: fixture.gallery, appearance: fixture.appearance, media_storage: mediaSummary() }
     if (action === "get_gallery_image") {
       const video = fixture.videos[args.item_id]

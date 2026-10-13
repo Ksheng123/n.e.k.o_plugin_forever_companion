@@ -163,6 +163,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
         valence, arousal = self._current_affect(shard)
         mood_payload: JsonObject = {
             "active": mood_active,
+            "history": [dict(item) for item in reversed(shard.mood.history[-12:])],
             # 系统级开关态（忽略总开关，防双重提示）：配置 ∧ 能力否决集
             # （1.2.7 能力中心：功能页关掉情绪引擎，状态条提示也要如实跟上）
             "system_enabled": self._cap_config_on("mood_engine", lanlan),
@@ -178,6 +179,8 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 "action": shard.mood.action,
                 "action_label": self._action_label(shard.mood.action),
                 "reason": shard.mood.reason,
+                "origin": shard.mood.origin,
+                "started_at": shard.mood.started_at,
                 "expires_at": shard.mood.expires_at or None,
             })
         # 潮汐日历：当前月前后各一个月的逐日推算（委婉显示，一律以"潮汐"代称）。
@@ -1463,25 +1466,48 @@ class PanelEntriesMixin(MediaGalleryMixin):
             return Err(SdkError("appearance_save_failed"))
         return Ok({"appearance": appearance})
 
+    @ui.action(
+        label=tr("actions.liftMood.label", default="结束当前状态"),
+        confirm=tr(
+            "actions.liftMood.confirm",
+            default="结束当前角色的情绪工具状态？心情观察与变化记录会保留，这不代表角色已经释怀。",
+        ),
+        refresh_context=True,
+    )
     @plugin_entry(
         id="lift_mood",
         name=tr("entries.lift_mood.name", default="解除情绪动作"),
         description=tr("entries.lift_mood.description", default="立刻结束当前生效的冷战沉默/已读不回等情绪状态。"),
-        input_schema={"type": "object", "properties": {}},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "expected_lanlan": {"type": "string"},
+                "expected_started_at": {"type": "number"},
+            },
+        },
     )
     @quick_action(icon="🫖", priority=5)
     async def lift_mood(self, **kwargs: Any):
         lanlan = await self._attribution_lanlan(kwargs)
         shard = await self._ensure_shard(lanlan)
+        if (
+            ("expected_lanlan" in kwargs and kwargs["expected_lanlan"] != lanlan)
+            or ("expected_started_at" in kwargs and kwargs["expected_started_at"] != shard.mood.started_at)
+        ):
+            return Err(SdkError("mood_changed"))
+        expired = self._expire_timed_action_if_due(shard)
+        if expired:
+            await self._on_mood_expired(lanlan, shard, expired)
+            await self._maybe_sync_proactive_pause()
         previous = shard.mood.action
         if not previous:
             return Ok({"cleared": False, "note": "no_active_mood"})
         # 只清动作字段：连续心情（valence/arousal）保留，靠惰性衰减自然回落，
         # 手动解除不该把余波瞬间清零（reset_all 全量重置才是 _MoodState()）
-        shard.mood.action = ""
-        shard.mood.reason = ""
-        shard.mood.started_at = 0.0
-        shard.mood.expires_at = 0.0
+        shard.mood.record_event("release", previous, "user")
+        shard.mood.clear_action()
+        shard.tone_window = []
+        shard.last_injected_whisper_key = ""
         res_mood = await self._save_shard_mood(lanlan, shard)
         # 解除情绪 → 解除暂停；水位写失败纳入聚合向用户可见（1.2.2 审查轮 P2）
         res_pause = await self._maybe_sync_proactive_pause()
@@ -1492,8 +1518,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
             parts=[{
                 "type": "text",
                 "text": (
-                    "[心情状态] 刚才的负面情绪状态已被解除（内部提示，不要提及）。"
-                    "从现在起放下那个状态，用你平时的方式自然回应。"
+                    "[心情记录] 用户结束了刚才的情绪工具状态（内部提示，不要复述）。"
+                    "这不是你自主决定和好的记录，也不代表你已经释怀。"
+                    "你的感受、语气与接下来怎样回应仍由你自己决定。"
                 ),
             }],
             source=self.plugin_id,

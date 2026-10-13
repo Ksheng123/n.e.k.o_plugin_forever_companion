@@ -15,6 +15,7 @@ import { videoChecks } from "./hosted_ui_video_checks.mjs"
 import { directChecks } from "./hosted_ui_direct_checks.mjs"
 import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
 import { diaryChecks } from "./hosted_ui_diary_checks.mjs"
+import { moodChecks } from "./hosted_ui_mood_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -22,7 +23,7 @@ const DEFAULT_HOST = resolve(DEFAULT_PLUGIN, "..", "N.E.K.O")
 const BUNDLED_MODULES = "C:/Users/ms/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"
 const TOOLING_MODULES = join(tmpdir(), "neko-companion-ui-tooling", "node_modules")
 const HOSTED = "frontend/plugin-manager/src/components/plugin/hosted"
-const TABS = ["overview", "calendar", "diary", "moment", "features", "cycle", "mood", "settings"]
+const TABS = ["overview", "calendar", "diary", "moment", "mood", "features", "cycle", "settings"]
 
 function option(name, fallback) {
   const index = process.argv.indexOf(`--${name}`)
@@ -1433,7 +1434,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1488,6 +1489,11 @@ async function main() {
         const emotion = await emotionIntervalChecks(browser, sources, origin, output)
         report.screenshots.push(...emotion.screenshots)
         report.interactions.push(...emotion.checks)
+      }
+      if (process.argv.includes("--mood") || process.argv.includes("--mood-only") || process.argv.includes("--emotion") || process.argv.includes("--emotion-only")) {
+        const mood = await moodChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...mood.screenshots)
+        report.interactions.push(...mood.checks)
       }
     } finally {
       if (browser) await browser.close()

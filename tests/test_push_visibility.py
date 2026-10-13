@@ -16,7 +16,7 @@ proactive_bridge.py` 明写 "visibility is NOT consulted here"）。本插件的
 `self._push(...)`；动态值、`["chat"]`、`["hud"]` 一律红；完全省略 visibility 放行——宿主默认即
 `[]`，见 `plugin/sdk/shared/core/push_message_schema.py`）。
 
-门分三层：①②行为门（真跑两条链路，断言"不上屏但仍起一轮"）③AST 静态门（扫全插件源码，
+门分三层：①②行为门（开场白起轮，到期仅 read，两者都不上屏）③AST 静态门（扫全插件源码，
 钉死"不许再长出第三处"）④反向对照（把三种坏形态喂给静态门，必须逐个报红——只会变绿的门比没有更危险）。
 """
 
@@ -159,7 +159,7 @@ def test_phase_opener_push_is_hidden_yet_takes_turn(plugin_factory_full):
     assert "不要复述本句" in pushes[0]["parts"][0]["text"]
 
 
-def test_recovery_line_push_is_hidden_yet_takes_turn(plugin_factory_full):
+def test_expiry_notice_is_hidden_without_starting_a_turn(plugin_factory_full):
     import asyncio
 
     def run(coro):
@@ -172,7 +172,8 @@ def test_recovery_line_push_is_hidden_yet_takes_turn(plugin_factory_full):
     pushes = [m for m in p._pushed if m.get("metadata", {}).get("message_type") == "forever_companion.mood_recovered"]
     assert len(pushes) == 1
     assert pushes[0]["visibility"] == [], f"恢复台词 visibility 泄漏: {pushes[0]['visibility']}"
-    assert pushes[0]["ai_behavior"] == "respond"
+    assert pushes[0]["ai_behavior"] == "read"
+    assert "不代表你已经消气" in pushes[0]["parts"][0]["text"]
 
 
 # ---------- ③ 静态门：全插件源码 ----------

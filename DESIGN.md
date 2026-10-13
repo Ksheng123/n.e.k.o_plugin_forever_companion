@@ -43,6 +43,14 @@
 - 对话注入：轮询 user_message 总线，检测到新用户消息且开启模拟时注入当前身体状态；
   注入频率策略 every_user_message / interval_n / on_trigger_keywords
 - 情绪系统：LLM 工具自主决策模式（非原版三段式小模型筛选），动作带到期时间自动解除
+  工具记录是参考，不覆盖角色性格、当前对话或回应决定；无需先调工具才允许改变语气。
+  到期只清记录并递内部 read 通知，不发起回复、不宣布消气或原谅。
+  道歉关键词与语气趋势只作可忽略提醒，不自动切状态。
+  每角色 mood@ 中保存 origin 与最多 40 条真实事件（choose/switch/release/expire），
+  dashboard 只展示最近 12 条，原因最多 200 字；旧数据不补造来源或历史。
+  历史仅本地面板使用，不进入模型上下文、成文素材或日志，不增加模型调用。
+  面板 lift_mood 确认传 expected_lanlan/expected_started_at，后端拒绝旧角色/旧状态；
+  用户结束与自主结束分开记录，结束保留连续心情与事件，不替角色和好。
 - Hosted TSX 面板 + 快捷操作
 
 ## 连续心情机制（valence/arousal）
@@ -339,12 +347,13 @@ ID 和错误类型**。本插件的落地形态：
 `visibility` 含 `"chat"` 就把 parts **原样画进聊天框**（`app/main_server/character_runtime.py`
 的 `render_chat_blocks` 通道，署名取 `source`）；要不要起一轮由 `ai_behavior` 决定。
 本插件的推送**全部**是给她看的内部提示（身体轻语 / 阶段开场白 / 日记邀请 / 纪念日 /
-生日 / 情绪恢复台词 / 语气与碎片轻语），因此：
+生日 / 情绪到期记录 / 语气与碎片轻语），因此：
 
 - **`visibility` 一律 `[]`**（完全省略也等于 `[]`——宿主默认）。要她"主动说一句"靠
   `ai_behavior="respond"` 起轮，而不是把提示词贴上屏。
-- 常驻门 `tests/test_push_visibility.py` 三层：①②行为门真跑开场白与恢复台词两条链路，
-  断言 `visibility == []` 且 `ai_behavior == "respond"`；③AST 静态门扫全插件推送出口
+- 情绪到期使用 `ai_behavior="read"`，只同步记录；阶段开场白继续使用 respond。
+- 常驻门 `tests/test_push_visibility.py` 三层：①②行为门真跑开场白与到期记录两条链路，
+  断言 `visibility == []`，分别为 respond/read；③AST 静态门扫全插件推送出口
   （直调 `push_message` + 主类注入 services 的 `self._push` 转发口），visibility 只准
   空列表字面量、`**kwargs` 必须静态解析到字面量，解析不出即红；④八种坏形态的反向对照
   逐个必须报红（含"纯转发口的调用方泄漏"）。

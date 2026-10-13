@@ -73,7 +73,7 @@ export const DEMO_STORIES: DemoStoryMap = {
     "process": "调用情绪工具，记录时限",
     "output": "更新情绪状态",
     "example": "暖流涌动 · 30 分钟",
-    "detail": "限时结束自动恢复；语气仍由角色模型决定。"
+    "detail": "到期只结束工具记录，不代表释怀；回应仍由角色决定。"
   },
   "tone_sense": {
     "scene": "tone",

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -232,8 +233,7 @@ _PROACTIVE_PAUSE_ACTIONS = frozenset({
     "ebb_tide", "sea_fog", "shallow_reef", "storm_surge", "seek_harbor",
 })
 
-# 正面动作：到期恢复台词按温和回落语气处理（区别于冲突导向的重度负面），
-# 面板徽标 tone 也据此分色
+# 正面动作：面板徽标 tone 据此分色
 _POSITIVE_ACTIONS = frozenset({"warm_current", "spring_tide"})
 
 # ---- 相处统计（1.1.0，stats.py）----
@@ -636,6 +636,7 @@ class _MoodState:
     __slots__ = (
         "action", "reason", "started_at", "expires_at",
         "valence", "arousal", "affect_updated_at",
+        "origin", "history",
     )
 
     def __init__(self) -> None:
@@ -646,6 +647,8 @@ class _MoodState:
         self.valence: float = 0.0
         self.arousal: float = 0.0
         self.affect_updated_at: float = 0.0
+        self.origin: str = ""
+        self.history: list[JsonObject] = []
 
     # 旧版本存储的情绪动作 id → 现行 id（升级迁移）
     _LEGACY_ACTION_IDS = {
@@ -671,6 +674,37 @@ class _MoodState:
             state.valence = float(raw.get("valence") or 0.0)
             state.arousal = float(raw.get("arousal") or 0.0)
             state.affect_updated_at = float(raw.get("affect_updated_at") or 0.0)
+            origin = raw.get("origin")
+            state.origin = origin if origin in ("self", "user") else ""
+            history = raw.get("history")
+            if isinstance(history, list):
+                for item in history[-40:]:
+                    if not isinstance(item, dict):
+                        continue
+                    if isinstance(item.get("ts"), bool):
+                        continue
+                    try:
+                        ts = float(item.get("ts"))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if not math.isfinite(ts) or ts <= 0:
+                        continue
+                    if item.get("kind") not in ("choose", "switch", "release", "expire"):
+                        continue
+                    if item.get("origin") not in ("self", "user", "timer"):
+                        continue
+                    action = item.get("action")
+                    if not isinstance(action, str) or action not in _MOOD_ACTION_LABEL_KEYS:
+                        continue
+                    previous = item.get("previous_action")
+                    state.history.append({
+                        "ts": ts,
+                        "kind": item["kind"],
+                        "origin": item["origin"],
+                        "action": action,
+                        "previous_action": previous if isinstance(previous, str) and previous in _MOOD_ACTION_LABEL_KEYS else "",
+                        "reason": str(item.get("reason") or "")[:200],
+                    })
             # 旧版的 proactive_prev（主动搭话暂停水位）有意忽略：
             # 0.5.0 起水位移到全局 proactive_state，由迁移逻辑单独搬运
         return state
@@ -684,7 +718,29 @@ class _MoodState:
             "valence": self.valence,
             "arousal": self.arousal,
             "affect_updated_at": self.affect_updated_at,
+            "origin": self.origin,
+            "history": [dict(item) for item in self.history],
         }
+
+    def record_event(
+        self, kind: str, action: str, origin: str, reason: str = "", *, previous_action: str = ""
+    ) -> None:
+        self.history.append({
+            "ts": time.time(),
+            "kind": kind,
+            "origin": origin,
+            "action": action,
+            "previous_action": previous_action,
+            "reason": reason[:200],
+        })
+        self.history = self.history[-40:]
+
+    def clear_action(self) -> None:
+        self.action = ""
+        self.reason = ""
+        self.started_at = 0.0
+        self.expires_at = 0.0
+        self.origin = ""
 
     def is_active(self, now: float | None = None) -> bool:
         if not self.action:

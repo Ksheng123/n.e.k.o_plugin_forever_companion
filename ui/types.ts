@@ -22,7 +22,19 @@ export type Mood = {
   action_label?: string
   reason?: string
   expires_at?: number | null
+  started_at?: number
+  origin?: string
+  history?: MoodEvent[]
   affect?: { valence: number; arousal: number; arousal_baseline?: number }
+}
+
+export type MoodEvent = {
+  ts: number
+  kind: "choose" | "switch" | "release" | "expire"
+  origin: "self" | "user" | "timer"
+  action: string
+  previous_action?: string
+  reason?: string
 }
 
 export type Settings = {

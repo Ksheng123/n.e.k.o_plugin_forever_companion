@@ -128,7 +128,7 @@ function MoodChip(props: { t: TFunc; mood: Mood }) {
   let remaining = ""
   if (mood.expires_at) {
     const minutes = Math.max(0, Math.round((mood.expires_at * 1000 - Date.now()) / 60000))
-    remaining = t("panel.overview.moodRemaining", { defaultValue: "约 {n} 分钟后缓和" }).replace("{n}", String(minutes))
+    remaining = t("panel.overview.moodRemaining", { defaultValue: "工具记录约 {n} 分钟后到期" }).replace("{n}", String(minutes))
   }
   return (
     <div className="tm-ov-mood-chip">
@@ -152,6 +152,7 @@ function MoodSummaryCard(props: { t: TFunc; mood: Mood }) {
   const vScore = valenceScore(v)
   return (
     <Card title={t("panel.mood.gauge.title", { defaultValue: "当前心情" })}>
+      <div className="tm-derived">{t("panel.mood.observationHint", { defaultValue: "插件估计，不代表角色全部感受" })}</div>
       <div className="tm-ov-mood">
         <span className="tm-ov-mood-word" style={{ color: wordColor }}>{word}</span>
         <div className="tm-ov-mood-bars">

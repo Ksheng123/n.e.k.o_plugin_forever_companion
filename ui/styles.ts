@@ -1,5 +1,35 @@
 // Panel materials share neutral surfaces; wallpaper transparency is controlled by appearance variables.
 export const PANEL_STYLES = `
+.tm-mood-current { display: grid; gap: 5px; min-width: 0; }
+.tm-mood-choice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; overflow-wrap: anywhere; }
+.tm-mood-choice strong { font-size: 15px; font-weight: 600; }
+.tm-mood-choice-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--muted); }
+.tm-mood-choice-dot-active { background: var(--primary); }
+.tm-mood-source { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.tm-mood-reason { min-width: 0; margin-top: 8px; }
+.tm-mood-reason summary, .tm-mood-earlier summary { font-size: 12px; color: var(--secondary); cursor: pointer; padding: 5px 0; overflow-wrap: anywhere; }
+.tm-mood-reason p { margin: 5px 0; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tm-mood-observation { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--tm-divider); }
+.tm-mood-observation-title { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 13px; }
+.tm-mood-observation-bars { display: grid; gap: 9px; margin-top: 12px; }
+.tm-mood-observation-bar { display: grid; grid-template-columns: minmax(0, 100px) minmax(30px, 1fr) 32px; align-items: center; gap: 10px; font-size: 12px; }
+.tm-mood-observation-bar > span { overflow-wrap: anywhere; }
+.tm-mood-observation-value { text-align: right; font-variant-numeric: tabular-nums; }
+.tm-mood-observation-track { height: 6px; border-radius: 3px; background: var(--tm-track); overflow: hidden; }
+.tm-mood-observation-track > div { height: 100%; }
+.tm-mood-actions { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.tm-mood-actions .neko-button { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.tm-mood-history { padding: 0; margin: 0; list-style: none; }
+.tm-mood-event { display: grid; grid-template-columns: minmax(0, 94px) minmax(0, 1fr); gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--tm-divider); }
+.tm-mood-event:last-child { border-bottom: 0; }
+.tm-mood-event time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tm-mood-event-body { min-width: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.tm-mood-earlier { border-top: 1px solid var(--tm-divider); padding-top: 8px; }
+.tm-mood-empty { padding: 8px 0; }
+@media (max-width: 420px) {
+  .tm-mood-event { grid-template-columns: minmax(0, 74px) minmax(0, 1fr); gap: 10px; }
+  .tm-mood-reason summary, .tm-mood-earlier summary { min-height: 36px; display: list-item; }
+}
 .neko-page {
   --text: #28282c; --muted: #64646c; --primary: #2676ba; --secondary: #466d91;
   --danger: #ba4054; --warning: #895211; --success: #397321; --info: #466d91;

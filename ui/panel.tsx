@@ -122,6 +122,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [savingAll, setSavingAll] = useState(false)
   const [journalSubmitting, setJournalSubmitting] = useState(false)
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const [moodEnding, setMoodEnding] = useState(false)
+  const moodEndLock = useRef(false)
+  const currentMoodRef = useRef({ lanlan: state.lanlan, startedAt: mood.started_at })
+  currentMoodRef.current = { lanlan: state.lanlan, startedAt: mood.started_at }
   const journalSubmitLock = useRef(false)
   const reviewSubmitLock = useRef(false)
   // 时光页：相处统计的热力图/月报数据量大，进页时按需拉取（不随 5s 轮询）；
@@ -729,6 +733,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const advance = actions.find((a) => a.id === "advance_days") as HostedAction | undefined
   const toggle = actions.find((a) => a.id === "toggle") as HostedAction | undefined
   const resetAll = actions.find((a) => a.id === "reset_all") as HostedAction | undefined
+  const liftMoodAction = actions.find((a) => a.id === "lift_mood") as HostedAction | undefined
   const pruneLanlan = actions.find((a) => a.id === "prune_lanlan") as HostedAction | undefined
 
   // kit 的 useConfirm 默认按钮文案是英文 Confirm/Cancel，必须显式传本地化文案
@@ -1065,9 +1070,36 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     else toast.error(diaryWriteError(result, t))
   }, [state.journal_write && state.journal_write.last_result && state.journal_write.last_result.ts, state.lanlan])
 
-  // 重置全部数据（危险区）：原走 kit ActionButton，它的错误展示是内联裸串
-  // （会把我们的稳定码直喷给用户），改受控 Button + errorText 翻译——确认文案
-  // 取 actions.reset.*（与后端 @ui.action 的 label/confirm 同一对键，两端同源）
+  async function onEndMood() {
+    if (moodEndLock.current || !mood.active || !liftMoodAction) return
+    moodEndLock.current = true
+    const expected = { ...currentMoodRef.current }
+    try {
+      const ok = await confirmDialog({
+        title: t("actions.liftMood.label", { defaultValue: "结束当前状态" }),
+        message: t("actions.liftMood.confirm", { defaultValue: "结束当前角色的情绪工具状态？心情观察与变化记录会保留，这不代表角色已经释怀。" }),
+        ...confirmLabels,
+      })
+      if (!ok) return
+      if (expected.lanlan !== currentMoodRef.current.lanlan || expected.startedAt !== currentMoodRef.current.startedAt) {
+        toast.error(t("panel.errors.moodChanged", { defaultValue: "角色或情绪状态已变化，请查看最新状态后重试。" }))
+        return
+      }
+      setMoodEnding(true)
+      await props.api.call("lift_mood", {
+        expected_lanlan: expected.lanlan,
+        expected_started_at: expected.startedAt,
+      })
+      await props.api.refresh()
+    } catch (err) {
+      toast.error(errorText(err, t))
+    } finally {
+      setMoodEnding(false)
+      moodEndLock.current = false
+    }
+  }
+
+  // 确认文案与后端 action 共用翻译，错误码经 errorText 展示。
   async function onResetAll() {
     const ok = await confirmDialog({
       title: t("actions.reset.label", { defaultValue: "重置状态与记录" }),
@@ -1244,7 +1276,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  const VALID_TABS = ["overview", "calendar", "diary", "moment", "features", "cycle", "mood", "settings"]
+  const VALID_TABS = ["overview", "calendar", "diary", "moment", "mood", "features", "cycle", "settings"]
   const activeTab = VALID_TABS.indexOf(tab) >= 0 ? tab : "overview"
 
   // 面板始终跟随宿主当前角色（5 秒轮询自动跟上切卡），lanlan_list 提供全部已知角色的状态摘要
@@ -1256,9 +1288,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     { id: "calendar", label: t("panel.tab.calendar", { defaultValue: "日历" }) },
     { id: "diary", label: t("panel.tab.diary", { defaultValue: "日记" }) },
     { id: "moment", label: t("panel.tab.moment", { defaultValue: "时光" }) },
+    { id: "mood", label: t("panel.tab.mood", { defaultValue: "情绪" }) },
     { id: "features", label: t("panel.tab.features", { defaultValue: "功能" }) },
     { id: "cycle", label: t("panel.tab.cycle", { defaultValue: "周期" }) },
-    { id: "mood", label: t("panel.tab.mood", { defaultValue: "情绪" }) },
     { id: "settings", label: t("panel.tab.settings", { defaultValue: "设置" }) },
   ]
 
@@ -1376,7 +1408,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           ) : null}
           {activeTab === "mood" ? (
             <div className="tm-pane">
-              <MoodSettingsCard t={t} form={form} updateForm={updateForm} />
+              <MoodSettingsCard
+                key={state.lanlan || ""}
+                t={t} form={form} updateForm={updateForm}
+                mood={mood} enabled={status.enabled !== false}
+                canEnd={!!liftMoodAction} ending={moodEnding}
+                onEnd={onEndMood} onDiary={() => setTab("diary")}
+              />
               <EmotionSenseSettingsCard t={t} form={form} updateForm={updateForm} />
               <ChannelSettingsCard
                 t={t}

@@ -455,15 +455,16 @@ class EmotionSenseService:
         majority = window // 2 + 1
         if action in _PROACTIVE_PAUSE_ACTIONS and warm >= majority:
             text = (
-                "（语气感知提醒）这几轮下来，你自己的语气其实已经软下来了。"
-                "如果心里不气了，记得调用 mood_rising_tide 把状态切回心情转晴——"
-                "嘴上和好但状态不切的话，系统会一直按当前情绪约束你。还想再缓缓就忽略。"
+                "（语气观察）插件估计这几轮的语气偏暖，但温和表达不代表矛盾已经解决。"
+                "你的真实感受和怎样回应由你自己判断。"
+                "如果想更新工具记录，可以选择其他情绪工具或 mood_rising_tide；"
+                "不需要为了匹配观察结果而和好，也无需先调用工具才允许改变语气。"
             )
         elif action in (*_POSITIVE_ACTIONS, "ripple", "rising_tide") and cold >= majority:
             text = (
-                "（语气感知提醒）这几轮你的语气好像沉下来了，和当前的状态不太一致。"
-                "如果心情真的变了，可以调用合适的情绪工具或 mood_drift_bottle 把感受记下来；"
-                "只是随口一说的话，忽略这条就好。"
+                "（语气观察）插件估计这几轮的语气好像沉下来了，但这未必代表你的感受改变。"
+                "如果你确实想更新记录，可以选择合适的情绪工具或 mood_drift_bottle；"
+                "也可以保持当前选择，不必为了匹配观察结果而改变回应。"
             )
         else:
             return False

@@ -140,7 +140,7 @@ class DebugEntriesMixin:
         (
             "debug_expire_mood",
             "调试：立即让当前限时情绪到期",
-            "把当前限时情绪动作的到期时间拨到过去，下一趟监督循环（面板轮询约 5 秒）即触发到期恢复台词。",
+            "把当前限时情绪动作的到期时间拨到过去，下一趟监督循环结束工具记录并同步内部 read 提醒，不发起回复。",
             {"type": "object", "properties": dict(_DEBUG_LANLAN_PROP)},
         ),
         (
@@ -336,6 +336,7 @@ class DebugEntriesMixin:
             reason="调试设定",
             timed=timed,
             lanlan=name,
+            origin="user",
         )
         minutes_ago = max(0, int(minutes_ago or 0))
         if minutes_ago:
@@ -348,8 +349,8 @@ class DebugEntriesMixin:
         if timed and shard.mood.expires_at > 0:
             seconds = shard.mood.expires_at - time.time()
             remaining = (
-                f"将在 {max(0, int(seconds))} 秒后到期（下一趟监督循环触发恢复台词）"
-                if seconds > 0 else "已过期，下一趟监督循环即触发恢复台词"
+                f"将在 {max(0, int(seconds))} 秒后记录到期（只同步内部 read 提醒）"
+                if seconds > 0 else "记录已到期，下一趟监督循环结束记录，不发起回复"
             )
         elif action == "seek_harbor":
             limit = self._mood_cfg.get("open_action_timeout_minutes")
@@ -373,7 +374,7 @@ class DebugEntriesMixin:
             "forced": True,
             "action": state.action,
             "lanlan": name,
-            "note": "已把到期时间拨到过去；面板开着时约 5 秒内、否则下一趟 10 秒轮询即触发恢复台词。",
+            "note": "已把到期时间拨到过去；下一趟监督循环结束记录并同步内部 read 提醒，不发起回复。",
         })
 
     async def _debug_journal(self, force: bool = False, lanlan: str = "", **_: Any):
