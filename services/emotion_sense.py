@@ -34,10 +34,12 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from ..core.affect import normalize_tone_signal
 from ..core.state import (
     _CORE_CONFIG_CACHE_TTL,
     _POSITIVE_ACTIONS,
     _PROACTIVE_PAUSE_ACTIONS,
+    _TONE_AFFECT_MIN_CONFIDENCE,
     _TONE_COLD_LABELS,
     _TONE_DIRECT_PROMPT,
     _TONE_SCREEN_NUDGE_SEC,
@@ -224,12 +226,7 @@ class EmotionSenseService:
                     "emotion sense dormant: analysis endpoint error: {}", payload.get("error")
                 )
             return None
-        label = str(payload.get("emotion") or "neutral")
-        try:
-            confidence = float(payload.get("confidence") or 0.0)
-        except (TypeError, ValueError):
-            confidence = 0.0
-        return label, confidence
+        return normalize_tone_signal(payload.get("emotion"), payload.get("confidence"))
 
     def _load_core_config(self) -> JsonObject:
         """读宿主 core_config.json（含明文 key），5 秒内存缓存；文件缺失/JSON 坏 → {}。"""
@@ -287,8 +284,8 @@ class EmotionSenseService:
         会 400 静默失败——语气感知全断的实测根因），按 lanlan 定向到该角色的
         memory/<角色>/recent.json；角色名含非 ASCII 时 URL 编码。
 
-        水位 = "轮数:末条回复hash"（per-shard）：recent.json 是滚动窗口，
-        条目数不变时旧条目会被新回复挤掉，hash 兜底。
+        水位 = "轮数:末轮对话hash"（per-shard）：recent.json 是滚动窗口，
+        条目数不变时旧条目会被新回复挤掉，用户与角色文本一起参与 hash 兜底。
         - peek=True：只读最新一轮，完全不动水位（调试入口用）；
         - advance=False：判定是否新轮但不推进水位（门控未过的轮留给下趟，
           间隔节流不该吞掉这轮分析机会；概率抽查跳过的轮才推进水位——
@@ -344,7 +341,7 @@ class EmotionSenseService:
                     turns.append((last_user, text))
             if not turns:
                 return None
-            marker = f"{len(turns)}:{hash(turns[-1][1])}"
+            marker = f"{len(turns)}:{hash(turns[-1])}"
             latest = turns[-1]
             # 更新指纹缓存（peek 也更新：指纹相同 = 内容相同，无副作用）；
             # 宿主不带 fingerprint 时永不缓存，退回每趟全量解析
@@ -370,7 +367,7 @@ class EmotionSenseService:
         if not self._emotion_sense_enabled(shard):
             return False
         now = time.time()
-        min_interval = self._tone_int_cfg("min_interval_sec", 60)
+        min_interval = self._tone_int_cfg("min_interval_sec", 20)
         if now - shard.last_tone_analysis_ts < min_interval:
             # 间隔节流前移到 poll 之前：空闲期不再每 tick 白拉一次 HTTP；
             # 不推进水位（也尚未拉取），这轮留给节流过后再分析。
@@ -399,21 +396,24 @@ class EmotionSenseService:
         result = await self._analyze_tone(her_text[:500], lanlan)
         if result is None:
             return False
-        label, confidence = result
-        # 语气信号喂入连续心情（两种模式都喂）：先惰性衰减再加、单轮限幅，随落盘
-        self._feed_affect(shard, label, confidence, now=now)
-        # 用户侧情绪同向传导（低权重，校正模式跳过）：互动氛围纳入考虑但占比更低
-        if not mood_active:
-            await self._maybe_feed_user_tone(lanlan, shard, user_text, now)
-        await self._save_mood(lanlan, shard)
-        # 感知活着的证据（每分钟最多一条，受 min_interval 兜底）：此前全链路静默，
-        # "面板数值不变"类故障零线索可查
-        self._logger().info(
-            "tone fed affect: lanlan={} label={} conf={:.2f} -> valence={:.2f} arousal={:.2f}",
-            lanlan, label, confidence, shard.mood.valence, shard.mood.arousal,
-        )
+        signal = normalize_tone_signal(*result)
+        if signal is None:
+            return False
+        label, confidence = signal
+        reliable = confidence >= _TONE_AFFECT_MIN_CONFIDENCE
+        if reliable:
+            # 先计低权重的互动氛围，再计角色自己的回复，避免上限裁切后用户侧反向拉低。
+            if not mood_active:
+                await self._maybe_feed_user_tone(lanlan, shard, user_text, now)
+            self._feed_affect(shard, label, confidence, now=time.time())
+            await self._save_mood(lanlan, shard)
+            self._logger().info(
+                "tone fed affect: lanlan={} label={} conf={:.2f} -> valence={:.2f} arousal={:.2f}",
+                lanlan, label, confidence, shard.mood.valence, shard.mood.arousal,
+            )
         if mood_active:
-            return self._correction_check(lanlan, shard, label)
+            return self._correction_check(lanlan, shard, label) if reliable else False
+        # 阶段灵敏度仍只影响提醒；不能降低连续数值和校正趋势的可靠性门槛。
         return self._screen_check(lanlan, shard, label, confidence)
 
     async def _maybe_feed_user_tone(self, lanlan: str, shard: _LanlanShard, user_text: str, now: float) -> None:
@@ -421,6 +421,7 @@ class EmotionSenseService:
         （默认 0.25）缩放步长喂入连续心情——互动氛围纳入考虑，但她的情绪表达绝对主导
         （她的回复权重 1.0）；配 0 关闭。只喂心情，不参与筛选/校正判定；
         校正模式不调用（校正只看她的表现，不该被用户侧稀释）。
+        低置信度和中性用户消息不积分，写入时使用实际完成时间。
         """
         weight = max(0.0, min(1.0, self._tone_float_cfg("user_affect_weight", 0.25)))
         user_text = (user_text or "").strip()
@@ -428,9 +429,14 @@ class EmotionSenseService:
             return
         result = await self._analyze_tone(user_text[:300], lanlan)
         if result is None:
-            return  # 分析失败静默降级，不影响她的主链路（已喂完）
-        label, confidence = result
-        self._feed_affect(shard, label, confidence, now=now, weight=weight)
+            return  # 用户分析失败不影响随后合入角色主信号
+        signal = normalize_tone_signal(*result)
+        if signal is None:
+            return
+        label, confidence = signal
+        if confidence < _TONE_AFFECT_MIN_CONFIDENCE or label == "neutral":
+            return
+        self._feed_affect(shard, label, confidence, now=time.time(), weight=weight)
         self._logger().info(
             "user tone fed affect: lanlan={} label={} conf={:.2f} w={:.2f} -> valence={:.2f} arousal={:.2f}",
             lanlan, label, confidence, weight, shard.mood.valence, shard.mood.arousal,

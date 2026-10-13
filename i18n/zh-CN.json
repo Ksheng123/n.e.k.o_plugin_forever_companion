@@ -898,6 +898,7 @@
   "panel.settings.timezone": "时区",
   "panel.settings.timezoneHelp": "周期与日历按此时区计算；默认自动跟随系统",
   "panel.settings.toneCheckRate": "语气检查频率",
+  "panel.settings.toneMinIntervalSec": "分析间隔（秒）",
   "panel.settings.toneCheckRateEvery": "每轮",
   "panel.settings.toneCheckRateHalf": "约一半",
   "panel.settings.toneCheckRateOff": "关闭检查",

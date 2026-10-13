@@ -176,6 +176,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     settings.mood_enabled,
     settings.default_action_minutes,
     settings.emotion_sense_enabled,
+    settings.tone_min_interval_sec,
     settings.tone_check_rate,
     settings.tone_phase_sensitivity_enabled,
     settings.tone_phase_sensitivity,

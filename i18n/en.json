@@ -898,6 +898,7 @@
   "panel.settings.timezone": "Timezone",
   "panel.settings.timezoneHelp": "Cycle and calendar use this timezone; follows the system by default",
   "panel.settings.toneCheckRate": "Tone check frequency",
+  "panel.settings.toneMinIntervalSec": "Analysis interval (seconds)",
   "panel.settings.toneCheckRateEvery": "Every turn",
   "panel.settings.toneCheckRateHalf": "About half",
   "panel.settings.toneCheckRateOff": "Checks off",

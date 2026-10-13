@@ -407,6 +407,7 @@ export function settingsToForm(settings: Settings): FormValues {
     mood_enabled: settings.mood_enabled !== false,
     default_action_minutes: Number(settings.default_action_minutes ?? 20),
     emotion_sense_enabled: settings.emotion_sense_enabled !== false,
+    tone_min_interval_sec: Number(settings.tone_min_interval_sec ?? 20),
     tone_check_rate: Number(settings.tone_check_rate ?? 1),
     tone_phase_sensitivity_enabled: settings.tone_phase_sensitivity_enabled !== false,
     tone_phase_sensitivity: Number(settings.tone_phase_sensitivity ?? 0.15),

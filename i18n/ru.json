@@ -898,6 +898,7 @@
   "panel.settings.timezone": "Часовой пояс",
   "panel.settings.timezoneHelp": "Цикл и календарь считают по этому часовому поясу; по умолчанию — системный",
   "panel.settings.toneCheckRate": "Частота проверки тона",
+  "panel.settings.toneMinIntervalSec": "Интервал анализа (секунды)",
   "panel.settings.toneCheckRateEvery": "Каждый диалог",
   "panel.settings.toneCheckRateHalf": "Примерно половина",
   "panel.settings.toneCheckRateOff": "Проверка выключена",

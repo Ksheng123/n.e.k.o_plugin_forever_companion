@@ -1,5 +1,32 @@
 # Isolated Hosted UI QA
 
+## 1.3.9 Emotion Analysis Interval
+
+The emotion tab's tone-sensing module exposes a 10..3600-second integer input
+with a 20-second default. It uses the shared save bar and only submits changed
+fields. Backend regressions cover bounds, rejected fractions/non-numbers,
+validation before other writes, Store reloads, preservation of existing custom
+intervals and immediate changes to runtime throttling.
+
+On 2026-10-13, `../dist/qa-mood-interval-139/report.json` recorded 16 passing
+browser interaction checks and 16 screenshots across all eight locales at
+1280px and 390px, with zero render or layout failures. The checks use the real
+hosted runtime in an isolated sandbox iframe; saving submits only the interval,
+and the five-second refresh preserves an unsaved interval.
+
+The initial typecheck in that report failed because the isolated tooling
+installed TypeScript 7, which is incompatible with the host checker. After
+aligning only the temporary tooling with the host's TypeScript 5.9 dependency,
+`../dist/qa-mood-interval-139-typecheck/report.json` passed typechecking.
+Hosted linking and scoped Ruff passed; Python regression passed 891 tests with
+38 skips. No host files or production Store data were modified. These checks
+do not replace a Steam import test.
+
+```powershell
+node tools/hosted_ui_harness.mjs --emotion-only --out ../dist/qa-mood-interval-139
+node tools/hosted_ui_harness.mjs --typecheck --typecheck-only --out ../dist/qa-mood-interval-139-typecheck
+```
+
 ## 1.3.9 Heatmap Readability
 
 The 2026-10-12 plugin-only import test uses a light-blue activity scale matching

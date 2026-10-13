@@ -475,7 +475,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
         "ovulation_day", "ovulation_window", "inject_mode", "inject_interval_n",
         "phase_openers", "timezone", "activity_context", "debug_mode",
         "mood_enabled", "default_action_minutes", "open_action_timeout_minutes",
-        "emotion_sense_enabled", "tone_check_rate",
+        "emotion_sense_enabled", "tone_min_interval_sec", "tone_check_rate",
         "tone_phase_sensitivity_enabled", "tone_phase_sensitivity",
         "tone_slot",
         "fragments_enabled", "fragments_slot", "fragments_mode",
@@ -515,6 +515,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 else 120
             ),
             "emotion_sense_enabled": bool(self._emotion_sense_cfg.get("enabled", True)),
+            "tone_min_interval_sec": self._tone_int_cfg("min_interval_sec", 20),
             "tone_check_rate": self._tone_float_cfg("check_rate", 1.0),
             "tone_phase_sensitivity_enabled": bool(
                 self._emotion_sense_cfg.get("phase_sensitivity_enabled", True)
@@ -574,6 +575,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 "default_action_minutes": {"type": "integer", "minimum": 1, "maximum": 720},
                 "open_action_timeout_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
                 "emotion_sense_enabled": {"type": "boolean"},
+                "tone_min_interval_sec": {"type": "integer", "minimum": 10, "maximum": 3600},
                 "tone_check_rate": {"type": "number", "enum": [0, 0.25, 0.5, 1.0]},
                 "tone_phase_sensitivity_enabled": {"type": "boolean"},
                 "tone_phase_sensitivity": {"type": "number", "enum": [0.1, 0.15, 0.25]},
@@ -617,6 +619,12 @@ class PanelEntriesMixin(MediaGalleryMixin):
         updates = {k: v for k, v in kwargs.items() if k in self._EDITABLE_SETTINGS and not k.startswith("_")}
         if not updates:
             return Err(SdkError("no_valid_fields"))
+        # Validate before any per-character writes; do not truncate fractional input.
+        if "tone_min_interval_sec" in updates:
+            interval = updates["tone_min_interval_sec"]
+            if (isinstance(interval, bool) or not isinstance(interval, (int, float))
+                    or not 10 <= interval <= 3600 or int(interval) != interval):
+                return Err(SdkError("settings_value_invalid"))
         lanlan, shard = await self._current_shard_async()
         # 本入口的两处落盘（cycle@<角色> 与全局 settings）：任一 Err 最后回 Err
         res_cycle: Result[None] = Ok(None)
@@ -696,6 +704,8 @@ class PanelEntriesMixin(MediaGalleryMixin):
             # ---- 语气感知（[emotion_sense]），全局 ----
             if "emotion_sense_enabled" in updates:
                 es_patch["enabled"] = bool(updates["emotion_sense_enabled"])
+            if "tone_min_interval_sec" in updates:
+                es_patch["min_interval_sec"] = int(updates["tone_min_interval_sec"])
             if "tone_check_rate" in updates:
                 es_patch["check_rate"] = min(1.0, max(0.0, float(updates["tone_check_rate"])))
             if "tone_phase_sensitivity_enabled" in updates:

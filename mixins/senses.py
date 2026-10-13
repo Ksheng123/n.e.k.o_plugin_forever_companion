@@ -19,7 +19,7 @@ from typing import Any
 
 from plugin.sdk.plugin import Err, Result
 
-from ..core.affect import _feed_tone_affect
+from ..core.affect import _feed_tone_affect, normalize_tone_signal
 from ..core.fragments import (
     build_fragment_prompt,
     fragment_record,
@@ -64,6 +64,7 @@ from ..core.state import (
     _REVIEW_DEFAULT_DAYS,
     _REVIEW_DEFAULT_SLOT,
     _REVIEW_DEFAULT_TURNS,
+    _TONE_AFFECT_MIN_CONFIDENCE,
     _channel_route,
     _LanlanShard,
     _now_utc,
@@ -409,6 +410,10 @@ class SensesMixin:
         weight: float = 1.0,
     ) -> None:
         """语气信号积分进连续心情（筛选/校正两种模式都喂；积分数学在 affect.py）。"""
+        signal = normalize_tone_signal(label, confidence)
+        if signal is None or signal[1] < _TONE_AFFECT_MIN_CONFIDENCE:
+            return
+        label, confidence = signal
         _feed_tone_affect(
             shard.mood, label, confidence, now=now,
             arousal_baseline=self._affect_arousal_baseline(), weight=weight,

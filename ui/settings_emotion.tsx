@@ -1,6 +1,6 @@
 // 设置 · 语气感知（全局）：回复后异步分析互动情绪，只提醒不自动改状态。
-// 槽位选择在「模型通道」卡；这张卡只管行为（启用/抽查频率/阶段灵敏度）。
-import { Card, Field, Grid, Select } from "@neko/plugin-ui"
+// 槽位选择在「模型通道」卡；这张卡只管行为（启用/分析间隔/抽查频率/阶段灵敏度）。
+import { Card, Field, Grid, NumberInput, Select } from "@neko/plugin-ui"
 import { TmSwitch } from "./tmswitch"
 import type { FormValues, TFunc } from "./types"
 
@@ -39,6 +39,9 @@ export function EmotionSenseSettingsCard(props: {
             {t("panel.settings.emotionSenseHint", { defaultValue: "回复完成后在后台分析，只发送提醒，不自动改变情绪状态" })}
           </div>
           <Grid cols={2}>
+            <Field className="tm-reserve-help" label={t("panel.settings.toneMinIntervalSec", { defaultValue: "分析间隔（秒）" })}>
+              <NumberInput value={form.tone_min_interval_sec} min={10} max={3600} step={1} onChange={(v: number | string) => updateForm({ tone_min_interval_sec: typeof v === "number" ? v : 20 })} />
+            </Field>
             <Field className="tm-reserve-help" label={t("panel.settings.toneCheckRate", { defaultValue: "语气检查频率" })}>
               <Select value={String(form.tone_check_rate)} options={toneCheckRates} onChange={(v: any) => updateForm({ tone_check_rate: Number(v) })} />
             </Field>

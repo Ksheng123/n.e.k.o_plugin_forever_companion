@@ -380,7 +380,7 @@ _AFFECT_VALENCE_TAU_SEC = 4 * 3600
 
 # 语气 label → 心情单轮积分方向（valence 方向系数, arousal 方向系数）；
 # 实际步长 = 方向 × confidence × 上限（v ±0.10 / a ±0.12，单轮限幅防一句话打满）。
-# neutral 不在表里：单独按"valence 向 0、arousal 向静息基线微拉一格"处理
+# neutral 不在表里：不主动拉低愉悦度，角色活跃度以四分之一步缓慢回归基线
 _TONE_AFFECT_DIRECTIONS = {
     "happy": (1.0, 0.75),
     "sad": (-1.0, -0.75),
@@ -389,6 +389,7 @@ _TONE_AFFECT_DIRECTIONS = {
 }
 _TONE_AFFECT_VALENCE_STEP = 0.10
 _TONE_AFFECT_AROUSAL_STEP = 0.12
+_TONE_AFFECT_MIN_CONFIDENCE = 0.6
 
 # 语气分析模型槽位（[emotion_sense].slot）：空串/"emotion" = 走宿主 /api/emotion/analysis；
 # 其他文本类槽位 = 读宿主 core_config.json 直连该槽端点。槽位值 → core_config 字段前缀
@@ -775,7 +776,7 @@ class _LanlanShard:
         # 个人日记邀请节流（1.3.2 起随 cycle@<角色> 落盘）：插件子进程会因切角色卡/
         # 改设置/覆盖导入反复重启，内存水位一弃就让"恒 due 的角色"每次启动重递一条
         self.last_journal_invite_ts = 0.0
-        # 语气感知（[emotion_sense]）：recent.json 水位（"轮数:末条回复hash"，diff 新增回复对）、
+        # 语气感知（[emotion_sense]）：recent.json 水位（"轮数:末轮对话hash"，diff 新增回复对）、
         # 校正模式的语气趋势窗口、分析节流与筛选提醒节流
         self.last_turn_marker = ""  # "" = 尚未建立基线（首趟只记水位不分析历史）
         # recent_file 响应指纹缓存：指纹未变 = 内容未变，跳过 json 解析与组对遍历，

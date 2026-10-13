@@ -898,6 +898,7 @@
   "panel.settings.timezone": "時區",
   "panel.settings.timezoneHelp": "週期與日曆按此時區計算；預設自動跟隨系統",
   "panel.settings.toneCheckRate": "語氣檢查頻率",
+  "panel.settings.toneMinIntervalSec": "分析間隔（秒）",
   "panel.settings.toneCheckRateEvery": "每輪",
   "panel.settings.toneCheckRateHalf": "約一半",
   "panel.settings.toneCheckRateOff": "關閉檢查",

@@ -898,6 +898,7 @@
   "panel.settings.timezone": "시간대",
   "panel.settings.timezoneHelp": "사이클과 달력은 이 시간대로 계산—기본은 시스템 추적",
   "panel.settings.toneCheckRate": "말투 확인 빈도",
+  "panel.settings.toneMinIntervalSec": "분석 간격(초)",
   "panel.settings.toneCheckRateEvery": "매 턴",
   "panel.settings.toneCheckRateHalf": "약 절반",
   "panel.settings.toneCheckRateOff": "확인 끄기",

@@ -898,6 +898,7 @@
   "panel.settings.timezone": "Fuso horário",
   "panel.settings.timezoneHelp": "O ciclo e o calendário usam este fuso; por padrão segue o sistema",
   "panel.settings.toneCheckRate": "Frequência de análise de tom",
+  "panel.settings.toneMinIntervalSec": "Intervalo de análise (segundos)",
   "panel.settings.toneCheckRateEvery": "Cada turno",
   "panel.settings.toneCheckRateHalf": "Aproximadamente metade",
   "panel.settings.toneCheckRateOff": "Desativar análise",

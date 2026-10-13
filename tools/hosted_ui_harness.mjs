@@ -232,6 +232,52 @@ async function screenshotMatrix(browser, sources, origin, output) {
   return results
 }
 
+async function emotionIntervalChecks(browser, sources, origin, output) {
+  const checks = []
+  const screenshots = []
+  for (const width of [1280, 390]) for (const locale of Object.keys(sources.messages)) {
+    const loaded = await loadPage(browser, origin, { locale, wallpaper: "none", tab: "mood" }, width, 900, "light")
+    const { page, frame, errors } = loaded
+    const id = `emotion-interval-${width}-${locale}`
+    try {
+      const label = sources.messages[locale]["panel.settings.toneMinIntervalSec"]
+      const input = frame.getByLabel(label, { exact: true })
+      assert.equal(await input.inputValue(), "20")
+      assert.equal(await input.getAttribute("min"), "10")
+      assert.equal(await input.getAttribute("max"), "3600")
+      await input.fill("45")
+      if (width === 390 && locale === "zh-CN") {
+        const before = await page.evaluate(() => window.qaRefreshes)
+        await page.waitForFunction(value => window.qaRefreshes > value, before, { timeout: 6500 })
+        assert.equal(await input.inputValue(), "45")
+      }
+      const before = await page.evaluate(() => window.qaMessages.length)
+      await frame.locator(".tm-save button").click()
+      await page.waitForFunction(() => window.qaFixture.context.state.settings.tone_min_interval_sec === 45)
+      const calls = await page.evaluate(offset => window.qaMessages.slice(offset).filter(message => message.method === "call" && message.payload.actionId === "update_settings"), before)
+      assert.equal(calls.length, 1)
+      assert.deepEqual(calls[0].payload.args, { tone_min_interval_sec: 45 })
+      await input.scrollIntoViewIfNeeded()
+      const layout = await inspectLayout(frame)
+      const path = join(output, `${id}.png`)
+      await page.screenshot({ path, animations: "disabled" })
+      const diagnostics = await page.evaluate(() => window.qaDiagnostics.filter(message => message.type === "neko-hosted-surface-error"))
+      screenshots.push({ id, path, layout, errors: [...errors], diagnostics })
+      assert.deepEqual(errors, [])
+      assert.deepEqual(diagnostics, [])
+      assert.equal(layout.documentOverflow, 0)
+      assert.equal(layout.contentOverflow, 0)
+      assert.deepEqual(layout.issues, [])
+      checks.push({ name: id, passed: true })
+      console.log(`PASS ${id}`)
+    } catch (error) {
+      checks.push({ name: id, passed: false, error: error.stack })
+      console.log(`FAIL ${id}: ${error.message}`)
+    } finally { await loaded.context.close() }
+  }
+  return { checks, screenshots }
+}
+
 async function interactionChecks(browser, origin, output) {
   const { context, page, frame, errors } = await loadPage(browser, origin, { locale: "en", wallpaper: "bright" }, 1280, 900, "light")
   const checks = []
@@ -1387,7 +1433,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1437,6 +1483,11 @@ async function main() {
         const diary = await diaryChecks(browser, sources, origin, output, { loadPage, inspectLayout })
         report.screenshots.push(...diary.screenshots)
         report.interactions.push(...diary.checks)
+      }
+      if (process.argv.includes("--emotion") || process.argv.includes("--emotion-only")) {
+        const emotion = await emotionIntervalChecks(browser, sources, origin, output)
+        report.screenshots.push(...emotion.screenshots)
+        report.interactions.push(...emotion.checks)
       }
     } finally {
       if (browser) await browser.close()

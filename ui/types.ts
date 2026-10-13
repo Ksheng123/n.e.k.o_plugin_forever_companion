@@ -39,6 +39,7 @@ export type Settings = {
   mood_enabled?: boolean
   default_action_minutes?: number
   emotion_sense_enabled?: boolean
+  tone_min_interval_sec?: number
   tone_check_rate?: number
   tone_phase_sensitivity_enabled?: boolean
   tone_phase_sensitivity?: number
@@ -377,6 +378,7 @@ export type FormValues = {
   mood_enabled: boolean
   default_action_minutes: number
   emotion_sense_enabled: boolean
+  tone_min_interval_sec: number
   tone_check_rate: number
   tone_phase_sensitivity_enabled: boolean
   tone_phase_sensitivity: number

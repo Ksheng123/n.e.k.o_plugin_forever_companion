@@ -184,6 +184,7 @@ def test_config_example_covers_every_config_key():
 # ---------------------------------------------------------------------------
 
 _UI_FORM_DEFAULTS = {
+    "tone_min_interval_sec": ("emotion_sense", "min_interval_sec", int),
     "fragments_slot": ("fragments", "slot", str),
     "fragments_mode": ("fragments", "mode", str),
     "review_slot": ("review", "slot", str),

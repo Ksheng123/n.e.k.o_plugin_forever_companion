@@ -898,6 +898,7 @@
   "panel.settings.timezone": "Zona horaria",
   "panel.settings.timezoneHelp": "El ciclo y el calendario usan esta zona; por defecto sigue al sistema",
   "panel.settings.toneCheckRate": "Frecuencia de análisis de tono",
+  "panel.settings.toneMinIntervalSec": "Intervalo de análisis (segundos)",
   "panel.settings.toneCheckRateEvery": "Cada turno",
   "panel.settings.toneCheckRateHalf": "Aproximadamente la mitad",
   "panel.settings.toneCheckRateOff": "Desactivar análisis",
