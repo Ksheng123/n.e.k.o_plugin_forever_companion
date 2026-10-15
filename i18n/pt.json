@@ -1,4 +1,5 @@
 {
+  "panel.journal.untitled": "Diário sem título",
   "actions.liftMood.label": "Encerrar estado atual",
   "actions.liftMood.confirm": "Encerrar o estado da ferramenta emocional deste personagem? As observações e os registros serão mantidos. Isso não significa que o personagem já superou o ocorrido.",
   "panel.errors.moodChanged": "O personagem ou o estado emocional mudou. Confira o estado atual e tente novamente.",

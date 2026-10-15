@@ -1,4 +1,5 @@
 {
+  "panel.journal.untitled": "Untitled Diary",
   "actions.liftMood.label": "End current state",
   "actions.liftMood.confirm": "End this character's mood tool state? Observations and event records will remain. This does not mean the character has let go.",
   "panel.errors.moodChanged": "The character or mood state has changed. Check the latest state and try again.",

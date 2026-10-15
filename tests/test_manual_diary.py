@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 from forever_companion.core.journal import build_journal_prompt, journal_materials
@@ -236,7 +237,9 @@ def test_journal_material_and_prompt_are_bounded_without_mutating_sources():
     assert len(material["items"]) == 2 and len(material["items"][0]["text"]) == 300
     assert material["sample_turns"] == [("hello", "reply")]
     assert (pages, diary) == before
-    assert "不再询问" in build_journal_prompt(material, "灵")
+    prompt = build_journal_prompt(material, "灵")
+    assert "不再询问" in prompt
+    assert "不要重复附加记录日期" in prompt and "不要只用日期作标题" in prompt
 
 
 def test_pending_manual_journal_consumed_by_own_timer_without_new_user_message(plugin_factory_full, monkeypatch):
@@ -359,19 +362,23 @@ def test_total_timeout_bounds_both_attempts_and_reports_elapsed_time(plugin_fact
     plugin, shard, calls = prepare(plugin_factory_full, monkeypatch)
     monkeypatch.setattr(senses, "_MANUAL_DIARY_ATTEMPT_SEC", 0.1)
     monkeypatch.setattr(senses, "_MANUAL_DIARY_TOTAL_SEC", 0.02)
+    clock = SimpleNamespace(now=0.0)
+    # Control only the writer's clock, leaving asyncio's event-loop clock intact.
+    monkeypatch.setattr(senses, "time", SimpleNamespace(time=time.time, monotonic=lambda: clock.now))
     logs = []
     plugin.logger.warning = lambda fmt, *args: logs.append(fmt.format(*args))
 
     async def stalled(*_, **kwargs):
         calls.append(kwargs)
-        await asyncio.Event().wait()
+        clock.now += kwargs["timeout_sec"]
+        raise TimeoutError()
 
     monkeypatch.setattr(plugin, "_channel_chat", stalled)
     run(plugin.invite_journal())
     run(plugin.diary_write_tick())
     assert len(calls) == 1 and calls[0]["timeout_sec"] <= 0.02
     assert shard.journal_write_result["reason"] == "request_timeout"
-    assert any("elapsed_ms=" in item and "route=direct|agent" in item for item in logs)
+    assert any("elapsed_ms=20 " in item and "route=direct|agent" in item for item in logs)
     assert not plugin._journal_writing and not plugin._channel_break
 
 

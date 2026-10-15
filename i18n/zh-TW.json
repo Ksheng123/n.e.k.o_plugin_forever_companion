@@ -1,4 +1,5 @@
 {
+  "panel.journal.untitled": "未命名日記",
   "actions.liftMood.label": "結束目前狀態",
   "actions.liftMood.confirm": "結束目前角色的情緒工具狀態？心情觀察與變化紀錄會保留，這不代表角色已經釋懷。",
   "panel.errors.moodChanged": "角色或情緒狀態已變化，請查看最新狀態後重試。",

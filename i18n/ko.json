@@ -1,4 +1,5 @@
 {
+  "panel.journal.untitled": "제목 없는 일기",
   "actions.liftMood.label": "현재 상태 종료",
   "actions.liftMood.confirm": "이 캐릭터의 감정 도구 상태를 종료할까요? 관찰값과 변화 기록은 유지됩니다. 캐릭터의 마음이 풀렸다는 뜻은 아닙니다.",
   "panel.errors.moodChanged": "캐릭터 또는 감정 상태가 바뀌었습니다. 최신 상태를 확인한 뒤 다시 시도하세요.",

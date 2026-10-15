@@ -16,7 +16,7 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
   }
   for (const locale of Object.keys(sources.messages)) {
     for (const width of [1280, 390]) {
-      const loaded = await loadPage(browser, origin, { locale, tab: "diary", wallpaper: "none" }, width, 900, "light")
+      const loaded = await loadPage(browser, origin, { locale, tab: "diary", wallpaper: "none", diaryCase: "headings" }, width, 900, "light")
       const { page, frame, context, errors } = loaded
       const text = sources.messages[locale]
       const refresh = async () => {
@@ -25,6 +25,51 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
       }
       try {
         for (const kind of ["journal", "review"]) {
+          await check(`${kind}-${locale}-${width}-fixed-date-above-title`, async () => {
+            await frame.getByRole("button", { name: text[kind === "journal" ? "panel.journal.tabJournal" : "panel.review.tabReview"], exact: true }).click()
+            const cards = frame.locator(kind === "journal" ? ".tmb-spine:not(.tmb-spine--file)" : ".tmb-spine--file")
+            await cards.first().waitFor()
+            const items = await page.evaluate(kind => window.qaFixture[kind], kind)
+            const stored = JSON.stringify(items)
+            const expected = ["卡片约定小记", text["panel.journal.untitled"], text["panel.journal.untitled"], "1999-12-31·跨年的约定", items[4].title, "一起等日落"]
+            for (let index = 0; index < expected.length; index++) {
+              const card = cards.nth(index)
+              const recorded = items[index].started_at || items[index].ts
+              assert.equal(await card.locator("time").count(), 1)
+              assert.equal(await card.locator(".tmb-record-date").innerText(), recorded.slice(0, 10))
+              assert.equal(await card.locator(".tmb-record-date").getAttribute("datetime"), recorded)
+              assert.equal(await card.locator(".tmb-cover-title").innerText(), expected[index])
+              assert(!/\d{4}-\d{2}-\d{2}/.test(await card.locator(".tmb-cover-bottom").innerText()))
+              const geometry = await card.evaluate(element => {
+                const date = element.querySelector(".tmb-record-date")
+                const title = element.querySelector(".tmb-cover-title")
+                const excerpt = element.querySelector(".tmb-cover-excerpt")
+                return {
+                  dateBottom: date.getBoundingClientRect().bottom, titleTop: title.getBoundingClientRect().top,
+                  titleBottom: title.getBoundingClientRect().bottom, excerptTop: excerpt.getBoundingClientRect().top,
+                  dateSize: parseFloat(getComputedStyle(date).fontSize), titleSize: parseFloat(getComputedStyle(title).fontSize),
+                }
+              })
+              assert(geometry.dateBottom < geometry.titleTop && geometry.titleBottom < geometry.excerptTop, JSON.stringify(geometry))
+              assert(geometry.titleSize > geometry.dateSize, JSON.stringify(geometry))
+            }
+            const id = `${kind}-headings-${locale}-${width}`
+            const path = join(output, `${id}.png`)
+            await page.screenshot({ path, animations: "disabled" })
+            const layout = await inspectLayout(frame)
+            assert.equal(layout.documentOverflow, 0)
+            assert.equal(layout.contentOverflow, 0)
+            assert.deepEqual(layout.issues, [])
+            screenshots.push({ id, path, layout, errors: [...errors], diagnostics: [] })
+            for (const index of [0, 1, 2, 3]) {
+              await cards.nth(index).click()
+              assert.equal(await frame.locator(".tmb-reading-title").innerText(), expected[index])
+              assert.equal(await frame.locator(".tmb-current-title").innerText(), expected[index])
+              await frame.locator(".tmb-foot .tmb-btn").first().click()
+            }
+            assert.equal(await page.evaluate(kind => JSON.stringify(window.qaFixture[kind]), kind), stored)
+            assert.deepEqual(errors, [])
+          })
           await check(`manual-${kind}-${locale}-${width}-queue-progress-and-specific-failure`, async () => {
             const action = kind === "journal" ? "invite_journal" : "write_review_now"
             const stateKey = kind === "journal" ? "journal_write" : "review_brief"
@@ -98,7 +143,7 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
         await frame.waitForSelector(selector)
         const catalogLabel = number => label("panel.journal.catalogPage").replace("{n}", String(number)).replace("{total}", "3")
         const assertReviewIdentity = async entry => {
-          const title = entry.title || label("panel.review.docTitle")
+          const title = entry.title || label("panel.journal.untitled")
           const composedAt = entry.ts.replace("T", " ").slice(0, 16)
           assert.equal(await frame.locator(".tmb-reading-title").innerText(), title)
           assert.equal(await frame.locator(".tmb-current-title").innerText(), title)
@@ -109,7 +154,7 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
         if (kind === "journal") await check(`${id}-journal-title-display-search-and-fallback`, async () => {
           const titles = await page.evaluate(() => window.qaFixture.journal.map(item => item.title || ""))
           assert.equal(await frame.locator(".tmb-cover-title").first().innerText(), titles[0])
-          assert.equal(await frame.locator(".tmb-cover-title").nth(1).innerText(), label("panel.journal.kicker"))
+          assert.equal(await frame.locator(".tmb-cover-title").nth(1).innerText(), label("panel.journal.untitled"))
           await frame.locator(".tmb-search").fill("onlyintitle")
           assert.equal(await frame.locator(selector).count(), 1)
           await frame.locator(selector).first().click()
@@ -120,9 +165,9 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
         })
         if (kind === "review") await check(`${id}-review-title-display-search-and-fallback`, async () => {
           const titles = await page.evaluate(() => window.qaFixture.review.map(item => item.title || ""))
-          assert.equal(await frame.locator(".tmb-cover-meta").first().locator("span").count(), 1)
+          assert.equal(await frame.locator(".tmb-cover-meta").first().locator("time").count(), 1)
           assert.equal(await frame.locator(".tmb-cover-title").first().innerText(), titles[0])
-          assert.equal(await frame.locator(".tmb-cover-title").nth(1).innerText(), label("panel.review.kicker"))
+          assert.equal(await frame.locator(".tmb-cover-title").nth(1).innerText(), label("panel.journal.untitled"))
           assert.equal(await frame.locator(".tmb-search").getAttribute("placeholder"), label("panel.review.search"))
           await frame.locator(".tmb-search").fill("reviewonlyintitle")
           assert.equal(await frame.locator(selector).count(), 1)
@@ -134,7 +179,7 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
           await frame.locator(".tmb-search").fill("")
         })
         if (kind === "journal") await check(`${id}-journal-identity-and-continuation-boundaries`, async () => {
-          assert.equal(await frame.locator(".tmb-cover-meta").first().locator("span").count(), 1)
+          assert.equal(await frame.locator(".tmb-cover-meta").first().locator("time").count(), 1)
           const diary = await page.evaluate(() => window.qaFixture.journal[0])
           const diaryLabel = label("panel.journal.diaryNo").replace("{n}", String(diary.page_no))
           assert.equal(diary.page_no, 53)
@@ -206,7 +251,7 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
           await frame.locator(".tm-content").evaluate(element => { element.scrollTop = 180 })
           await frame.locator(".tmb-foot .tmb-btn").last().click()
           assert((await body.innerText()).includes(`${kind}-2-tail`))
-          if (kind === "journal") assert((await frame.locator(".tmb-reading-title").innerText()).includes("2026-09-02"))
+          if (kind === "journal") assert.equal(await frame.locator(".tmb-reading-title").innerText(), label("panel.journal.untitled"))
           if (kind === "review") await assertReviewIdentity(await page.evaluate(() => window.qaFixture.review[1]))
           assert.equal(await frame.locator(".tm-content").evaluate(element => element.scrollTop), 0)
           await frame.locator(".tmb-foot .tmb-btn").nth(1).click()
@@ -306,6 +351,8 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
       assert.equal(await frame.locator(".tmb-current-title").innerText(), await frame.locator(".tmb-reading-title").innerText())
       assert.deepEqual(await frame.locator(".tmb-entry-kind").allInnerTexts(), ["First entry", "Continuation", "Continuation"])
       assert.equal(await frame.locator(".tm-content").evaluate(element => element.scrollTop), scrollBefore)
+      await frame.locator(".tmb-foot .tmb-btn").first().click()
+      assert.equal(await frame.locator(".tmb-record-date").first().innerText(), "2026-09-01")
       assert.equal(await page.evaluate(() => JSON.stringify(window.qaFixture.journal)), stored)
       assert.deepEqual(continued.errors, [])
     })

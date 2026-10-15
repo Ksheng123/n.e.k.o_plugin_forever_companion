@@ -1,4 +1,5 @@
 {
+  "panel.journal.untitled": "未命名日记",
   "actions.liftMood.label": "结束当前状态",
   "actions.liftMood.confirm": "结束当前角色的情绪工具状态？心情观察与变化记录会保留，这不代表角色已经释怀。",
   "panel.errors.moodChanged": "角色或情绪状态已变化，请查看最新状态后重试。",

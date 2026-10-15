@@ -68,6 +68,7 @@ def test_prompt_requests_title_and_body_together_without_changing_observer_role(
     assert "JSON" in prompt and "title" in prompt and "text" in prompt and "40 字" in prompt
     assert "第三人称观察者" in prompt and "不粉饰" in prompt and "共 60 轮对话" in prompt
     assert "\\n 转义" in prompt
+    assert "不要重复附加记录日期" in prompt and "不要只用日期作标题" in prompt
 
 
 def test_single_compose_saves_title_and_archive_survives_restart(plugin_factory_full, monkeypatch):

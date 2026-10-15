@@ -537,7 +537,18 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
   )
 }
 
-// 目录保留页码身份，直接展示日期和正文摘录；不修改存储中的文本。
+function diaryHeading(title: string | undefined, recordedAt: string | undefined, t: TFunc): string {
+  let heading = String(title || "").trim()
+  const recorded = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(recordedAt || ""))
+  const prefix = /^(\d{4})[-./年](\d{1,2})[-./月](\d{1,2})日?(?=$|[\s·•:：|｜—–-])[\s·•:：|｜—–-]*/.exec(heading)
+  // Hide only a repeated recording-date prefix; keep historical dates in real titles.
+  if (recorded && prefix && [1, 2, 3].every(index => Number(recorded[index]) === Number(prefix[index]))) {
+    heading = heading.slice(prefix[0].length).trim()
+  }
+  return heading || t("panel.journal.untitled", { defaultValue: "未命名日记" })
+}
+
+// 目录日期固定取首次记录，标题和正文摘录只在显示层整理。
 function JournalShelf(props: {
   t: TFunc
   index: Array<JournalPageHeader & { entries?: Array<{ text?: string }> }>
@@ -578,10 +589,10 @@ function JournalShelf(props: {
             onClick={() => onOpen(no)}
           >
             <span className="tmb-cover-meta">
-              <span className="tmb-cover-title">{page.title || t("panel.journal.kicker", { defaultValue: "角色日记" })}</span>
+              <time className="tmb-record-date" dateTime={page.started_at}>{String(page.started_at || "").slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</time>
             </span>
-            <span className="tmb-spine-date">{String(page.started_at || "").slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</span>
-            <span className="tmb-cover-excerpt">{excerpt || journalRangeLabel(page)}</span>
+            <span className="tmb-cover-title">{diaryHeading(page.title, page.started_at, t)}</span>
+            <span className="tmb-cover-excerpt">{excerpt || "--"}</span>
             <span className="tmb-cover-bottom">
               <span className="tmb-cover-trend"><span className="tm-mood-dot" style={{ background: shelfInk(page.mood_avg) }} />{t(journalTrendKey(page.mood_avg), { defaultValue: "" })}</span>
               {page.legacy ? <span>{t("panel.journal.legacy", { defaultValue: "旧版周记" })}</span> : null}
@@ -616,7 +627,7 @@ function JournalBook(props: {
     secs: splitSections(entry.text),
   }))
   const diaryNo = page.page_no ? t("panel.journal.diaryNo", { defaultValue: "日记 #{n}" }).replace("{n}", String(page.page_no)) : ""
-  const diaryTitle = page.title || journalRangeLabel(page) || t("panel.journal.noDate", { defaultValue: "未注明日期" })
+  const diaryTitle = diaryHeading(page.title, page.started_at, t)
   return (
     <div className="tmb-book" ref={readingRef}>
       <div className="tmb-page">
@@ -626,13 +637,9 @@ function JournalBook(props: {
             {archiveLabel ? <span className="tmb-archive-badge">{archiveLabel}</span> : null}
             <span className="tmb-head-no">{diaryNo}</span>
           </div>
-          <h3 className={page.title ? "tmb-reading-title" : "tmb-reading-title tmb-reading-range"}>
-            {page.title || (journalRangeLabel(page) || t("panel.journal.noDate", { defaultValue: "未注明日期" })).split(" ~ ").map((date, i) => (
-              <span className="tmb-date-part" key={String(i)}>{i ? `~ ${date}` : date}</span>
-            ))}
-          </h3>
+          <h3 className="tmb-reading-title">{diaryTitle}</h3>
           <div className="tmb-reading-meta">
-            {page.title ? <span>{journalRangeLabel(page)}</span> : null}
+            <span>{journalRangeLabel(page)}</span>
             <span className="tmb-head-trend"><span className="tm-mood-dot" style={{ background: shelfInk(page.mood_avg) }} />{t(journalTrendKey(page.mood_avg), { defaultValue: "" })}</span>
             {page.legacy ? <span>{t("panel.journal.legacy", { defaultValue: "旧版周记" })}</span> : null}
           </div>
@@ -788,12 +795,11 @@ function ReviewShelf(props: {
               onClick={() => onOpen(ts)}
             >
               <span className="tmb-cover-meta">
-                <span className="tmb-cover-title">{entry.title || t("panel.review.kicker", { defaultValue: "相处记录" })}</span>
+                <time className="tmb-record-date" dateTime={ts}>{ts.slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</time>
               </span>
-              <span className="tmb-spine-date">{ts.slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</span>
+              <span className="tmb-cover-title">{diaryHeading(entry.title, ts, t)}</span>
               <span className="tmb-cover-excerpt">{diaryExcerpt(entry.text) || "--"}</span>
               <span className="tmb-cover-bottom">
-                <span>{spanShort(entry.span)}</span>
                 <span className="tmb-chevron" aria-hidden="true" />
               </span>
             </button>
@@ -833,7 +839,7 @@ function ReviewBook(props: {
   const moodAvg = entry.mood_avg === null || entry.mood_avg === undefined || !Number.isFinite(Number(entry.mood_avg)) ? null : Number(entry.mood_avg)
   const quotes = Array.isArray(entry.quotes) ? entry.quotes.filter((q) => String(q && q.quote || "").trim()) : []
   const hasEvidence = toneParts.length > 0 || moodAvg !== null || quotes.length > 0
-  const diaryTitle = entry.title || t("panel.review.docTitle", { defaultValue: "近期相处记录" })
+  const diaryTitle = diaryHeading(entry.title, entry.ts, t)
   const composedAt = String(entry.ts || "").replace("T", " ").slice(0, 16) || t("panel.journal.noDate", { defaultValue: "未注明日期" })
   return (
     <div className="tmb-book" ref={readingRef}>

@@ -1,5 +1,64 @@
 # Diary UI QA (1.3.9)
 
+## 2026-10-15 Recording Date and Title
+
+Both diary catalogs now show the immutable recording date as small top metadata,
+the diary title in larger type, and the body excerpt underneath. Personal Journal
+uses `started_at`, including after continuation; My Diary uses its composition
+`ts`. Material date ranges remain available in the reader and hover details.
+
+Display formatting removes a leading date only when it matches the stored
+recording date. Other historical dates in titles remain intact. Missing titles
+and titles containing only the recording date use the localized "Untitled Diary"
+fallback in both catalog and reader. Stored titles, timestamps and diary bodies
+are not rewritten. Generation prompts ask for content titles without repeated
+recording dates.
+
+The headings fixture covers repeated dates, missing titles, date-only titles,
+unrelated historical dates, long titles, reader consistency and retained source
+data in all eight locales at desktop and narrow widths. The existing continuation
+workflow also checks that returning to the catalog retains the original date.
+
+```powershell
+node tools/hosted_ui_harness.mjs --diary-only --compact --typecheck --out ../dist/qa-diary-headings-20261015
+```
+
+Verification passed: 158 interaction checks and 88 screenshots, with zero check,
+render or layout failures. Chinese desktop and narrow captures were inspected.
+Hosted typechecking, 32-module linking and Ruff for changed Python files passed.
+The targeted Python suite passed 162 tests; both updated generation-prompt
+assertions also passed in a focused run. This is not a new full-suite result;
+the previously reported millisecond timeout-boundary failure is outside this
+display change.
+
+`../dist/forever_companion_1.3.9_diary_titles_20261015.neko-plugin` passed the
+official strict validator, ZIP CRC and payload hash checks. All 77 packaged
+source files matched the plugin directory. The host Git worktree remained clean;
+no production diary data, installation, tag or release was changed.
+
+### Commit Readiness Recheck
+
+The pre-push full run initially reproduced the existing 20 ms deadline test
+failure: the requested timeout was 0.020000000000436557 rather than at most
+0.02. Earlier runs also depended on Windows event-loop timer resolution.
+The regression now controls only the writer module's monotonic clock, advances
+it by the requested timeout, and reports a timeout from the model stub.
+It still requires exactly one call after the total budget is exhausted and
+now asserts the actual 20 ms elapsed-time log. Production deadlines are unchanged;
+the separate real event-loop timeout/retry checks remain in place.
+
+All 42 manual-diary tests passed. The subsequent full Python run passed
+966 tests with 38 skips and no failures:
+
+```powershell
+python -B -m pytest tests -q -p no:cacheprovider
+```
+
+Ruff for changed Python files and the Hosted linker also passed. No UI source
+changed after the 158-check browser run above, so those results remain applicable.
+
+The following notes describe the earlier diary redesign.
+
 The 2026-10-13 local import build redesigns Personal Journal and My Diary using
 light-blue accents, visible date/text previews and an eight-item directory.
 Search checks the complete stored body, including text beyond the displayed

@@ -141,6 +141,18 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
   if (diaryCase === "legacy") {
     review.splice(0, review.length, { ts: "2026-01-01T19:00:00", text: SAMPLE })
   }
+  if (diaryCase === "headings") {
+    for (const items of [journal, review]) {
+      items.forEach((item, index) => {
+        const recorded = (item.started_at || item.ts).slice(0, 10)
+        if (index === 0) item.title = `${recorded.replaceAll("-", ".")}·卡片约定小记`
+        if (index === 2) item.title = recorded
+        if (index === 3) item.title = "1999-12-31·跨年的约定"
+        if (index === 4) item.title = "把那些还没来得及说出口的小事留在这一页，等下次想起你的时候再慢慢接着写"
+        if (index === 5) item.title = `${recorded.replaceAll("-", "/")} : 一起等日落`
+      })
+    }
+  }
   const capabilities = [
     ["whisper", "rhythm", "injection"], ["phase_openers", "rhythm", "injection"],
     ["activity_sense", "rhythm", "none"], ["anniversary", "rhythm", "injection"],

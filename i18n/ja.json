@@ -1,4 +1,5 @@
 {
+  "panel.journal.untitled": "無題の日記",
   "actions.liftMood.label": "現在の状態を終了",
   "actions.liftMood.confirm": "このキャラクターの感情ツールの状態を終了しますか？観察値と変化の記録は残ります。キャラクターが気持ちを整理できたことを意味するものではありません。",
   "panel.errors.moodChanged": "キャラクターまたは感情の状態が変わりました。最新の状態を確認して再試行してください。",

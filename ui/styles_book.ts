@@ -77,10 +77,10 @@ export const BOOK_STYLES = `
 }
 .tmb-cover-meta { justify-content: space-between; flex-wrap: nowrap; align-items: flex-start; }
 .tmb-cover-title {
-  min-width: 0; color: var(--tmb-ink); font-size: 13px; font-weight: 600;
+  min-width: 0; color: var(--tmb-ink); font-size: 18px; font-weight: 600; line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
 }
-.tmb-spine-date { font-size: 18px; font-weight: 600; line-height: 1.35; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tmb-record-date { font-weight: 500; font-variant-numeric: tabular-nums; }
 .tmb-cover-excerpt {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   min-height: 42px; font-size: 13px; line-height: 1.65; color: var(--tmb-ink-soft); overflow-wrap: anywhere;
