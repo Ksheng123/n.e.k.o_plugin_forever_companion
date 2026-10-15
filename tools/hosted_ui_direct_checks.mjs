@@ -4,13 +4,14 @@ import { createHash } from "node:crypto"
 import { copyFileSync, createReadStream, mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { recordFixture, largeFixture } from "./hosted_ui_video_checks.mjs"
 
 const VIDEO = "video.tm-bg-video"
 
-async function startProbe(pluginRoot, hostRoot, directory) {
+async function startProbe(hostRoot, directory) {
   const child = spawn(join(hostRoot, ".venv/Scripts/python.exe"), [
-    "-B", join(pluginRoot, "tools/playback_route_probe.py"),
+    "-B", join(dirname(fileURLToPath(import.meta.url)), "playback_route_probe.py"),
     "--host", hostRoot, "--directory", directory,
   ], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } })
   let stderr = ""
@@ -85,13 +86,14 @@ export async function directChecks(browser, sources, origin, output, helpers) {
   const checks = []
   const screenshots = []
   const measurements = []
+  const measureOnly = process.argv.includes("--measure-only")
   const fixture = largeFixture(await recordFixture(browser, output), output)
   sources.qaVideoFixture = fixture.source
   sources.qaDirectPath = `/plugin/forever_companion/ui/${fixture.sha256}.webm`
   sources.qaDirectRequests = []
   const directory = mkdtempSync(join(tmpdir(), "neko-direct-playback-"))
   copyFileSync(fixture.assetPath, join(directory, `${fixture.sha256}.webm`))
-  const probe = await startProbe(pluginRoot, hostRoot, directory)
+  const probe = await startProbe(hostRoot, directory)
   sources.qaPlaybackPort = probe.port
   async function check(name, operation) {
     try {
@@ -116,7 +118,7 @@ export async function directChecks(browser, sources, origin, output, helpers) {
       const traversal = await fetch(`http://127.0.0.1:${probe.port}/plugin/forever_companion/ui/..%2Fprivate.db`)
       assert.equal(traversal.status, 403)
     })
-    for (const width of [1280, 390]) {
+    for (const width of measureOnly ? [] : [1280, 390]) {
       const started = Date.now()
       const loaded = await loadPage(browser, origin, { locale: "en", wallpaper: "video", direct: "true" }, width, width === 390 ? 700 : 900, "light", "no-preference")
       try {
@@ -125,6 +127,9 @@ export async function directChecks(browser, sources, origin, output, helpers) {
           measurements.push({ width, phase: "initial", elapsedIncludingPixelChecksMs: Date.now() - started, bytes: fixture.size })
           assert.equal(moving.source, `${origin}${sources.qaDirectPath}`)
           assert.equal((await chunks(loaded)).length, 0)
+          assert.equal(await loaded.frame.evaluate(() => window.qaCreatedVideos.length), 1, "Direct playback created a redundant decoder probe")
+          assert.equal(await loaded.page.evaluate(() => window.qaMessages.filter(message =>
+            message.payload?.actionId === "get_gallery_image").length), 0, "Bootstrap fetched selected metadata twice")
           assert.equal(await loaded.page.locator("#hosted").getAttribute("sandbox"), "allow-scripts")
           const path = join(output, `direct-${width}-playing.png`)
           await loaded.page.screenshot({ path, animations: "disabled" })
@@ -148,6 +153,74 @@ export async function directChecks(browser, sources, origin, output, helpers) {
           assert(await loaded.frame.locator(VIDEO).evaluate(video => video === window.qaDirectNode))
           await assertDirectMoving(loaded)
         })
+        await check(`direct-${width}-focus-and-pageshow-resume-without-poll-delay`, async () => {
+          const source = await loaded.frame.locator(VIDEO).evaluate(video => {
+            window.qaFocusSource = video.currentSrc
+            video.pause()
+            window.dispatchEvent(new Event("focus"))
+            return video.currentSrc
+          })
+          await loaded.frame.waitForFunction(() => !document.querySelector("video.tm-bg-video").paused, null, { timeout: 800 })
+          await assertDirectMoving(loaded)
+          await loaded.frame.locator(VIDEO).evaluate(video => {
+            video.pause()
+            window.dispatchEvent(new Event("pageshow"))
+          })
+          await loaded.frame.waitForFunction(() => !document.querySelector("video.tm-bg-video").paused, null, { timeout: 800 })
+          assert.equal((await assertDirectMoving(loaded)).source, source)
+          assert.equal((await chunks(loaded)).length, 0)
+        })
+        await check(`direct-${width}-stalled-decoder-recovers-when-paused-is-false`, async () => {
+          const source = await loaded.frame.locator(VIDEO).evaluate(video => {
+            const nativePlay = video.play.bind(video)
+            const currentTime = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")
+            window.qaRecoveredSeek = 0
+            video.pause()
+            Object.defineProperty(video, "paused", { configurable: true, get: () => false })
+            video.play = () => Promise.resolve()
+            Object.defineProperty(video, "currentTime", {
+              configurable: true, get: () => currentTime.get.call(video),
+              set: value => {
+                window.qaRecoveredSeek++
+                delete video.paused
+                delete video.play
+                delete video.currentTime
+                currentTime.set.call(video, value)
+                nativePlay()
+              },
+            })
+            return video.currentSrc
+          })
+          await loaded.frame.waitForFunction(() => window.qaRecoveredSeek > 0, null, { timeout: 9000 })
+          assert.equal((await assertDirectMoving(loaded)).source, source)
+          assert.equal((await chunks(loaded)).length, 0)
+        })
+        if (width === 1280) await check("direct-stalled-frame-presentation-reloads-same-source-once", async () => {
+          const source = await loaded.frame.locator(VIDEO).evaluate(video => {
+            const requestFrame = video.requestVideoFrameCallback.bind(video)
+            const load = video.load.bind(video)
+            const now = performance.now.bind(performance)
+            window.qaRecoveryOffset = 0
+            window.qaRecoveryLoads = 0
+            performance.now = () => now() + window.qaRecoveryOffset
+            video.requestVideoFrameCallback = () => 0
+            video.load = () => {
+              window.qaRecoveryLoads++
+              video.requestVideoFrameCallback = requestFrame
+              load()
+            }
+            return video.currentSrc
+          })
+          // Stop only frame presentation callbacks; currentTime still advances.
+          await loaded.frame.waitForTimeout(150)
+          await loaded.frame.evaluate(() => { window.qaRecoveryOffset = 5000 })
+          await loaded.frame.waitForTimeout(1200)
+          await loaded.frame.evaluate(() => { window.qaRecoveryOffset = 10000 })
+          await loaded.frame.waitForFunction(() => window.qaRecoveryLoads === 1, null, { timeout: 2500 })
+          assert.equal((await assertDirectMoving(loaded)).source, source)
+          assert.equal(await loaded.frame.evaluate(() => window.qaRecoveryLoads), 1)
+          assert.equal((await chunks(loaded)).length, 0)
+        })
         await check(`direct-${width}-runtime-error-recovers-once-through-blob`, async () => {
           await loaded.frame.locator(VIDEO).evaluate(video => video.dispatchEvent(new Event("error")))
           await loaded.frame.waitForFunction(() => document.querySelector("video.tm-bg-video")?.currentSrc.startsWith("blob:"), null, { timeout: 15000 })
@@ -159,6 +232,37 @@ export async function directChecks(browser, sources, origin, output, helpers) {
         })
       } finally { await loaded.context.close() }
     }
+    if (!measureOnly) {
+      const legacy = await loadPage(browser, origin, {
+        locale: "en", wallpaper: "video", direct: "true", legacyGallery: "true",
+      }, 1280, 900, "light", "no-preference")
+      try {
+        await check("direct-legacy-gallery-without-bootstrap-still-plays", async () => {
+          await assertDirectMoving(legacy)
+          assert.equal((await chunks(legacy)).length, 0)
+          assert.equal(await legacy.page.evaluate(() => window.qaMessages.filter(message =>
+            message.payload?.actionId === "get_gallery_image").length), 1)
+        })
+      } finally { await legacy.context.close() }
+    }
+    for (let round = 0; round < 3; round++) {
+      const timed = await loadPage(browser, origin, {
+        locale: "en", wallpaper: "video", direct: "true", rpcDelay: "200",
+      }, 1280, 900, "light", "no-preference")
+      try {
+        await check(`direct-first-frame-with-200ms-rpc-${round + 1}`, async () => {
+          await assertDirectMoving(timed)
+          measurements.push({ phase: "first-frame", round: round + 1, simulatedRpcMs: 200,
+            ...await timed.frame.evaluate(() => ({
+              firstFrameMs: window.qaFirstWallpaperFrameAt, decoderCount: window.qaCreatedVideos.length,
+            })),
+            metadataRequests: await timed.page.evaluate(() => window.qaMessages.filter(message =>
+              message.payload?.actionId === "get_gallery_image").length),
+          })
+        })
+      } finally { await timed.context.close() }
+    }
+    if (measureOnly) return { checks, screenshots, measurements }
     for (const direct of ["missing", "unsafe"]) {
       const loaded = await loadPage(browser, origin, { locale: "en", wallpaper: "video", direct }, 1280, 900, "light", "no-preference")
       try {

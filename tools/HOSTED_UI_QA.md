@@ -1,5 +1,80 @@
 # Isolated Hosted UI QA
 
+## 1.4.0 Version And Import Package
+
+The 1.3.10 performance and recovery changes documented below are included in
+1.4.0. The manifest, Python project, lockfile and current README version agree.
+Historical QA reports and the earlier import-test package retain their names.
+
+For 1.4.0, the full Python suite passed 972 tests with 38 existing explicit skips.
+Hosted typecheck and the 32-module link check passed. The isolated official
+build passed strict validation, ZIP CRC, payload hash verification and comparison
+of all 77 packaged source files.
+
+Package: `../dist/forever_companion_1.4.0.neko-plugin` (679,048 bytes).
+SHA-256:
+`37e59cc73ded21de5acb335b37adcf91672fcfd030815a4d12f5819a515da2d7`.
+Reports: `../dist/pytest-release-140` and
+`../dist/qa-release-140-typecheck/report.json`.
+Steam import and actual GPU/window-switch behavior remain user tests.
+
+## 1.3.10 Panel Loading And Video Recovery
+
+The plugin combines the initial gallery snapshot with the selected wallpaper.
+Video metadata can reuse that request's storage scan; the filesystem scan uses
+one worker dispatch. Older gallery responses remain supported. Direct and Blob
+playback use the displayed decoder, with the previous background retained until
+the candidate presents its first frame. Invalid candidates retain the old
+background or static cover. Hidden documents skip dashboard polling; slow polls
+do not overlap, and visibility restores refreshes.
+
+The actual player listens for focus/pageshow and detects missing presented
+frames even when `paused` is false. It tries a small seek, then one reload of
+the same URL. A fresh video-frame callback is armed after reload. Persistent
+failure follows the existing direct-to-Blob fallback or displays the cover.
+Long suspension uses a seek to refresh decoder output before showing motion.
+This cannot identify all corruption while frames continue to arrive.
+
+`../dist/qa-panel-perf-direct-1310-final/report.json` passed 24 checks, including
+desktop/mobile reopen, focus/pageshow, a decoder stall with false paused state,
+a missing-frame stall with advancing media time, a single same-source reload,
+legacy metadata responses, HTTP Range, direct errors and reduced motion.
+The installed 198,941,764-byte MP4 was tested read-only through a temporary
+copy; playback and reopen passed. No live Store or Steam installation changed.
+
+`../dist/qa-panel-perf-video-1310-final/report.json` passed 61 video interactions
+and 31 screenshots, including damaged decode with/without an old background,
+large videos, hidden parent iframe, upload cancellation, clearing, resource
+release, all eight locales, desktop/mobile and light/dark. Render and layout
+failures were zero. Desktop fallback and narrow moving-video screenshots were
+visually inspected. Noise in the generated moving fixture is intentional.
+
+The timing comparison uses the existing `forever_companion_1.3.9.neko-plugin`
+archive as the old source, the same isolated Hosted runtime and a simulated
+200ms delay per RPC. Three old first-frame samples were 661.7/598.8/600.1ms;
+three new samples were 418.1/362.9/357.6ms. Medians were 600.1 and 362.9ms.
+The old path created two video elements and made a second metadata RPC; the
+new path created one and reused the initial response. Timing starts in the
+child document and ends at the displayed player's first frame callback.
+It excludes real Steam panel creation and production SDK storage latency.
+Reports: `qa-panel-perf-measure-baseline-139` and
+`qa-panel-perf-measure-1310-final`, both under `../dist`.
+
+The import-test package is
+`../dist/forever_companion_1.3.10_panel_performance.neko-plugin`.
+Final Python regression passed 972 tests with 38 existing explicit skips.
+`qa-panel-perf-review-1310-final/report.json` passed 45 additional interaction
+checks and two screenshots on the final UI source, including ordinary settings,
+gallery selection, cancellation and direct playback recovery. Hosted typecheck,
+32-module linking and scoped Ruff passed. The official isolated build passed
+strict validation, ZIP CRC, payload hash and comparison of 77 source files.
+The package is 679,061 bytes with SHA-256
+`cc727ffdf2491cc5c4004aa4690aa74733aecc89c71a50bd4203f35baa127505`.
+The host Git worktree remained clean.
+
+Steam import, real operating-system window switching, GPU artifacts and the
+user's subjective opening latency still require a local test of this package.
+
 ## 1.3.9 Manual Diary Timeout Fix
 
 This acceptance supersedes the initial 25-second manual deadline below.

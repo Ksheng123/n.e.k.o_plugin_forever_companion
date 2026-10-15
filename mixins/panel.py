@@ -1127,17 +1127,45 @@ class PanelEntriesMixin(MediaGalleryMixin):
         id="get_panel_gallery",
         name=tr("entries.get_panel_gallery.name", default="读取面板图库"),
         description=tr("entries.get_panel_gallery.description", default="读取面板图库索引与外观参数，并迁移旧版单图背景（面板内部用）。"),
-        input_schema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {
+            "include_background": {"type": "boolean"},
+            "prefer_direct": {"type": "boolean"},
+        }},
         timeout=_MEDIA_ENTRY_TIMEOUT_SECONDS,
         metadata={"result_kind": "event", "agent_hidden": True},
     )
-    async def get_panel_gallery(self, **_: Any):
-        return await self._gallery_call(self._get_panel_gallery)
+    async def get_panel_gallery(
+        self, include_background: bool = False, prefer_direct: bool = False, **_: Any,
+    ):
+        return await self._gallery_call(
+            self._get_panel_gallery, include_background=include_background, prefer_direct=prefer_direct,
+        )
 
-    async def _get_panel_gallery(self):
+    async def _get_panel_gallery(self, include_background: bool = False, prefer_direct: bool = False):
         await self._video_cleanup(reclaim_live=True)
         index = await self._gallery_index_strict()
         media_storage = await self._media_storage_summary(index)
+
+        async def snapshot(appearance: JsonObject, migrated: bool):
+            payload = {"items": index.get("items") or [], "appearance": appearance,
+                       "migrated": migrated, "media_storage": media_storage}
+            item = gallery_find(index, appearance["bg_id"]) if include_background is True else None
+            if item is not None:
+                try:
+                    if item.get("kind") == "video":
+                        result = await self._video_get(
+                            item, -1, prefer_direct=prefer_direct is True and appearance["motion"],
+                            storage_summary=media_storage,
+                        )
+                    else:
+                        result = await self._store_read(gallery_img_key(item["id"]))
+                    if isinstance(result, Ok) and isinstance(result.value, dict):
+                        payload["background"] = {"id": item["id"], "media": result.value}
+                except GalleryMediaError:
+                    # A bad selected asset must not hide settings or the rest of the gallery.
+                    self.logger.info("panel background bootstrap unavailable")
+            return Ok(payload)
+
         res = await self._store_read(_STORE_PANEL_APPEARANCE)
         if not isinstance(res, Ok):
             raise GalleryMediaError("gallery_update_failed")
@@ -1146,8 +1174,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
             appearance = clamp_appearance(raw)
             if appearance["bg_id"] and gallery_find(index, appearance["bg_id"]) is None:
                 appearance["bg_id"] = ""
-            return Ok({"items": index.get("items") or [], "appearance": appearance, "migrated": False,
-                       "media_storage": media_storage})
+            return await snapshot(appearance, False)
         # 外观参数从未建立 → 尝试旧版单图一次性迁移
         legacy_res = await self._store_read(_STORE_PANEL_BG)
         migrated = legacy_to_gallery(legacy_res.value if isinstance(legacy_res, Ok) else None)
@@ -1166,10 +1193,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
             if isinstance(save_res, Err):
                 return Err(SdkError("background_migrate_failed"))
             self.logger.info("legacy panel background migrated into gallery: id={}", gid)
-            return Ok({"items": index.get("items") or [], "appearance": appearance, "migrated": True,
-                       "media_storage": await self._media_storage_summary(index)})
-        return Ok({"items": index.get("items") or [], "appearance": appearance_defaults(), "migrated": False,
-                   "media_storage": media_storage})
+            media_storage = await self._media_storage_summary(index)
+            return await snapshot(appearance, True)
+        return await snapshot(appearance_defaults(), False)
 
     @ui.action(
         label=tr("actions.gallery_add.label", default="添加壁纸到图库"),

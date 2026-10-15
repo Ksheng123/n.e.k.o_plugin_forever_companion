@@ -187,7 +187,8 @@ def test_unready_wallpaper_retains_only_an_existing_gallery_image():
     assert "prepare().catch((err) => {" in source
     assert "image.decode().then(ready).catch(ready)" not in source
     assert "if (!alive || mediaGeneration.current !== generation) return" in source
-    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme, media: currentMedia })" in source
+    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme," in source
+    assert "media: currentMedia?.url ? { ...currentMedia, loading: true } : currentMedia" in source
     assert "alive = false" in source
     assert 'setReadyBg({ id: "", dataUrl: "", theme: null })' in source
     assert "galleryItems.some((item) => String(item.id || \"\") === readyBg.id)" in source
@@ -200,10 +201,10 @@ def test_wallpaper_and_cached_colors_share_the_decode_lifecycle():
     assert "cached?.dataUrl === themeSource ? cached.theme : readWallpaperTheme(image)" in source
     assert "const latestMedia = videoCache.current[draftAp.bg_id]" in source
     assert "latestMedia && latestMedia.url === media?.url ? latestMedia : media" in source
-    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme, media: currentMedia })" in source
+    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme," in source
     assert 'setBackgroundError(currentMedia?.error || "")' in source
     assert "if (!currentMedia?.loading) setBackgroundProgress" in source
-    assert "bgDataUrl && readyBg.theme ? readyBg.theme : DEFAULT_THEME_COLORS" in source
+    assert "bgDataUrl && displayedBg.theme ? displayedBg.theme : DEFAULT_THEME_COLORS" in source
     assert "themeColorVars(themeColors)" in source
     assert "delete themeCache.current[id]" in source
 

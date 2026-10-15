@@ -42,7 +42,6 @@ import {
   downloadGalleryVideo,
   readMediaStorage,
   uploadVideoFile,
-  verifyVideoUrl,
   MEDIA_CLEANUP_TIMEOUT_MS,
   MEDIA_REQUEST_TIMEOUT_MS,
   VIDEO_MAX_BYTES,
@@ -95,6 +94,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [imgCache, setImgCache] = useState<Record<string, string>>({})
   const [readyBg, setReadyBg] = useState<{ id: string; dataUrl: string; theme: ThemeColors | null; media?: GalleryMedia }>({ id: "", dataUrl: "", theme: null })
   const readyBgRef = useRef(readyBg)
+  const previousReadyBg = useRef<typeof readyBg | null>(null)
   readyBgRef.current = readyBg
   const videoCache = useRef<Record<string, GalleryMedia>>({})
   const pendingUploadedVideo = useRef("")
@@ -204,14 +204,20 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 面板打开期间周期性同步 context：宿主切换角色后自动跟上，情绪状态/阶段等外部变化
   // （入口点触发、tick 到期、对话中的 LLM 工具调用）无需重进面板即可看到
   useEffect(() => {
-    const timer = setInterval(() => {
-      try {
-        props.api.refresh()
-      } catch {
-        // 轮询失败静默忽略，下个周期重试
-      }
-    }, 5000)
-    return () => clearInterval(timer)
+    let alive = true
+    let refreshing = false
+    const refresh = () => {
+      if (!alive || document.hidden || refreshing) return
+      refreshing = true
+      Promise.resolve().then(() => props.api.refresh()).catch(() => {}).finally(() => { refreshing = false })
+    }
+    const timer = setInterval(refresh, 5000)
+    document.addEventListener("visibilitychange", refresh)
+    return () => {
+      alive = false
+      clearInterval(timer)
+      document.removeEventListener("visibilitychange", refresh)
+    }
   }, [])
 
   // 外观（1.2.0）：面板打开时拉一次图库索引 + 已存参数（图片本体不进轮询）；
@@ -222,7 +228,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     const generation = mediaGeneration.current
     const revision = gallerySnapshotRevision.current
     const controller = new AbortController()
-    Promise.resolve(props.api.call("get_panel_gallery", {}, {
+    Promise.resolve(props.api.call("get_panel_gallery", {
+      include_background: true, prefer_direct: !reducedMotion,
+    }, {
       timeoutMs: MEDIA_REQUEST_TIMEOUT_MS, signal: controller.signal,
     }))
       .then((payload) => {
@@ -238,8 +246,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         }
         setSavedAp(ap)
         setDraftAp(ap)
+        playbackRequested.current = ap.motion && !reducedMotion
         if (ap.bg_id) {
-          loadImage(ap.bg_id)
+          loadImage(ap.bg_id, false, r.background?.id === ap.bg_id ? r.background.media : undefined)
         }
       })
       .catch(() => {
@@ -263,7 +272,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   }, [])
 
   // 图片本体按需拉取（带在途去重）：选中某张壁纸时若没缓存就拉
-  function loadImage(id: string, forceBlob = false) {
+  function loadImage(id: string, forceBlob = false, initialMedia?: Record<string, any>) {
     if (!id) return
     if (imgInflight.current[id]) return
     const cachedVideo = videoCache.current[id]
@@ -273,7 +282,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     imgInflight.current[id] = request
     setBackgroundError("")
     setBackgroundProgress({ id, value: 0, stage: "preparing" })
-    Promise.resolve(props.api.call(
+    Promise.resolve(initialMedia || props.api.call(
       "get_gallery_image",
       { item_id: id, prefer_direct: !forceBlob && playbackRequested.current && !!props.host?.origin },
       { timeoutMs: MEDIA_REQUEST_TIMEOUT_MS, signal: request.controller?.signal },
@@ -303,7 +312,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               media.error = errorText(error, t)
             }
           }
-        if (request.cancelled || mediaGeneration.current !== generation || imgInflight.current[id] !== request) {
+          if (request.cancelled || mediaGeneration.current !== generation || imgInflight.current[id] !== request) {
             if (media.url) URL.revokeObjectURL(media.url)
             return
           }
@@ -346,6 +355,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // draft 指向的图若未缓存则补拉（切换/新加入库时）
   useEffect(() => {
     // Switching cancels the old download before the next chunk is requested.
+    if (readyBgRef.current.media?.loading && previousReadyBg.current && readyBgRef.current.id !== draftAp.bg_id) {
+      setReadyBg(previousReadyBg.current)
+      previousReadyBg.current = null
+    }
     for (const id of Object.keys(imgInflight.current)) {
       if (id !== draftAp.bg_id || (!playbackRequested.current && galleryItems.some((item) => item.id === id && item.kind === "video"))) {
         cancelMediaTask(imgInflight.current[id])
@@ -360,6 +373,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const requestedBgUrl = draftAp.bg_id ? (imgCache[draftAp.bg_id] || "") : ""
   useEffect(() => {
     if (!draftAp.bg_id) {
+      previousReadyBg.current = null
       setReadyBg({ id: "", dataUrl: "", theme: null })
       setBackgroundError("")
       setBackgroundProgress(null)
@@ -368,7 +382,6 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     if (!requestedBgUrl) return
     let alive = true
     const generation = mediaGeneration.current
-    const task: MediaTask = { cancelled: false }
     const media = videoCache.current[draftAp.bg_id]
     const themeSource = media ? media.poster : requestedBgUrl
     const image = new Image()
@@ -379,19 +392,21 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       const cached = themeCache.current[draftAp.bg_id]
       const theme = cached?.dataUrl === themeSource ? cached.theme : readWallpaperTheme(image)
       themeCache.current[draftAp.bg_id] = { dataUrl: themeSource, theme }
+      const previous = readyBgRef.current
+      if (currentMedia?.url && previous.dataUrl && previous.id !== draftAp.bg_id && !previous.media?.loading) {
+        previousReadyBg.current = previous
+      } else if (!currentMedia?.loading && !currentMedia?.url) previousReadyBg.current = null
       // 壁纸和配色同帧切换，草稿还原和迟到解码共享同一个生命周期。
-      setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme, media: currentMedia })
+      setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme,
+        media: currentMedia?.url ? { ...currentMedia, loading: true } : currentMedia })
       setBackgroundError(currentMedia?.error || "")
-      if (!currentMedia?.loading) setBackgroundProgress((current) => current?.id === draftAp.bg_id ? null : current)
+      if (currentMedia?.url) setBackgroundProgress({ id: draftAp.bg_id, value: 100, stage: "preparing" })
+      else if (!currentMedia?.loading) setBackgroundProgress((current) => current?.id === draftAp.bg_id ? null : current)
     }
     image.onload = () => {
       const prepare = async () => {
         if (image.decode) await image.decode()
         if (!alive || mediaGeneration.current !== generation) return
-        if (media?.url) {
-          setBackgroundProgress({ id: draftAp.bg_id, value: 100, stage: "preparing" })
-          if (!media.direct) await verifyVideoUrl(media.url, task)
-        }
         ready()
       }
       prepare().catch((err) => {
@@ -410,10 +425,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         setBackgroundProgress((current) => current?.id === draftAp.bg_id ? null : current)
       }
     }
-    image.src = themeSource
+    if (themeCache.current[draftAp.bg_id]?.dataUrl === themeSource) ready()
+    else image.src = themeSource
     return () => {
       alive = false
-      cancelMediaTask(task)
       image.onload = image.onerror = null
     }
   }, [draftAp.bg_id, requestedBgUrl])
@@ -423,15 +438,31 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     if (media.direct && selectedBgId.current === id) {
       // A cache eviction or an older host can fail after the initial probe.
       // Recover once via the established Blob path for this displayed item.
-      setReadyBg((current) => current.id === id ? { ...current, media: { ...media, url: "", direct: false } } : current)
+      setReadyBg((current) => current.id === id ? { ...current, media: { ...media, url: "", direct: false, loading: true } } : current)
       loadImage(id, true)
-    } else setBackgroundError(errorText("wallpaper_video_play_failed", t))
+    } else {
+      const previous = previousReadyBg.current
+      previousReadyBg.current = null
+      if (previous && previous.id !== id && galleryItemsRef.current.some((item) => item.id === previous.id)) {
+        setReadyBg(previous)
+      } else if (media.loading) setReadyBg((current) => current.id === id ? { ...current, media: { ...media, url: "", loading: false } } : current)
+      setBackgroundProgress((current) => current?.id === id ? null : current)
+      setBackgroundError(errorText("wallpaper_video_play_failed", t))
+    }
+  }
+
+  function backgroundPlaybackReady(id: string, media: GalleryMedia) {
+    if (!panelAlive.current || mediaClearing.current || readyBgRef.current.id !== id || readyBgRef.current.media?.url !== media.url) return
+    previousReadyBg.current = null
+    setReadyBg((current) => current.id === id && current.media?.url === media.url
+      ? { ...current, media: { ...media, loading: false } } : current)
+    setBackgroundProgress((current) => current?.id === id ? null : current)
   }
 
   // Keep at most the displayed video and the pending selection in memory.
   useEffect(() => {
     for (const id of Object.keys(videoCache.current)) {
-      if (id === readyBg.id || id === draftAp.bg_id || id === pendingUploadedVideo.current) continue
+      if (id === readyBg.id || id === draftAp.bg_id || id === previousReadyBg.current?.id || id === pendingUploadedVideo.current) continue
       if (videoCache.current[id].url) URL.revokeObjectURL(videoCache.current[id].url)
       delete videoCache.current[id]
       setImgCache((prev) => {
@@ -440,7 +471,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         return next
       })
     }
-  }, [readyBg.id, draftAp.bg_id])
+  }, [readyBg.id, readyBg.media?.loading, draftAp.bg_id])
 
   // 缺缩略图的在用图（如旧版迁移来的 legacy）：拿到本体后本地画一张回填
   useEffect(() => {
@@ -1296,10 +1327,11 @@ export default function Panel(props: PluginSurfaceProps<State>) {
 
   // 参数保持 draft 实时预览；图片准备期间只暂留仍在图库中的旧图。
   const previousBgExists = galleryItems.some((item) => String(item.id || "") === readyBg.id)
+  const displayedBg = readyBg.media?.loading && previousReadyBg.current ? previousReadyBg.current : readyBg
   const bgDataUrl = draftAp.bg_id && (readyBg.id === draftAp.bg_id || previousBgExists)
-    ? readyBg.dataUrl
+    ? displayedBg.dataUrl
     : ""
-  const themeColors = bgDataUrl && readyBg.theme ? readyBg.theme : DEFAULT_THEME_COLORS
+  const themeColors = bgDataUrl && displayedBg.theme ? displayedBg.theme : DEFAULT_THEME_COLORS
   // 背景材质只在壁纸就绪时应用，无壁纸保持默认中性卡片。
   const surfaceAppearance = bgDataUrl ? draftAp : { ...draftAp, glass: 0, card_alpha: 100 }
   const rootStyle = Object.assign({ display: "contents" }, appearanceVars(surfaceAppearance), themeColorVars(themeColors)) as Record<string, string>
@@ -1316,6 +1348,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
             ? { ...draftAp, fill: "cover" } : draftAp, bgDataUrl)} />
           {readyBg.media?.kind === "video" && readyBg.media.url ? (
             <BackgroundVideo media={readyBg.media} appearance={draftAp}
+              onReady={() => backgroundPlaybackReady(readyBg.id, readyBg.media!)}
               onError={() => backgroundPlaybackError(readyBg.id, readyBg.media!)} />
           ) : null}
           <div className="tm-bg-dim" style={{ opacity: String(draftAp.dim) }} />

@@ -204,17 +204,11 @@ export async function downloadGalleryVideo(
   if (chunkBytes !== VIDEO_CHUNK_BYTES || count !== Math.ceil(size / chunkBytes)) throw new Error("video_read_failed")
   const directUrl = galleryPlaybackUrl(metadata, hostOrigin)
   if (directUrl) {
-    const probe = document.createElement("video")
-    try {
-      await waitVideoFrame(probe, directUrl, task, 3000)
-      checkMediaTask(task)
-      progress?.(100)
-      console.info("[forever_companion] media playback: mode=direct status=ready")
-      return { kind: "video", url: directUrl, poster: String(metadata.poster || ""), direct: true }
-    } catch {
-      checkMediaTask(task)
-      console.info("[forever_companion] media playback: mode=direct status=fallback")
-    } finally { releaseVideo(probe) }
+    checkMediaTask(task)
+    // The displayed player owns decode and fallback; a probe would decode the
+    // same source twice and delay the first visible frame.
+    progress?.(100)
+    return { kind: "video", url: directUrl, poster: String(metadata.poster || ""), direct: true }
   }
   const chunks: Uint8Array[] = []
   let bytes = 0
@@ -266,11 +260,16 @@ export function BackgroundVideo(props: {
   media: GalleryMedia
   appearance: Appearance
   onError: () => void
+  onReady: () => void
 }) {
   const ref = useRef<HTMLVideoElement | null>(null)
   const motion = useRef(props.appearance.motion)
+  const onError = useRef(props.onError)
+  const onReady = useRef(props.onReady)
   const syncPlayback = useRef<(() => void) | null>(null)
   motion.current = props.appearance.motion
+  onError.current = props.onError
+  onReady.current = props.onReady
   useEffect(() => {
     const video = ref.current
     if (!video) return
@@ -279,6 +278,18 @@ export function BackgroundVideo(props: {
     let failed = false
     let playRequest = 0
     let playPending = false
+    let suspended = false
+    let suspendedAt = 0
+    let blurredAt = 0
+    let lastTime = -1
+    let lastProgress = performance.now()
+    let recoveryCount = 0
+    let lastRecovery = 0
+    let resumeAt: number | null = null
+    let waitingFrame = true
+    let frameRequest: number | undefined
+    let announced = false
+    const frameCallbacks = typeof video.requestVideoFrameCallback === "function"
     const reduced = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null
     video.muted = true
     video.defaultMuted = true
@@ -290,20 +301,68 @@ export function BackgroundVideo(props: {
       failed = true
       video.pause()
       video.style.opacity = "0"
-      props.onError()
+      onError.current()
+    }
+    const presented = () => {
+      if (!alive || failed || suspended || video.seeking || document.hidden || !motion.current || reduced?.matches) return
+      lastProgress = performance.now()
+      lastTime = video.currentTime
+      if (lastProgress - lastRecovery > 10000) recoveryCount = 0
+      if (waitingFrame) {
+        waitingFrame = false
+        video.style.opacity = "1"
+      }
+      if (!announced) {
+        announced = true
+        onReady.current()
+      }
+    }
+    const watchFrame = () => {
+      frameRequest = video.requestVideoFrameCallback(() => {
+        presented()
+        if (alive && !failed) watchFrame()
+      })
+    }
+    const progressed = () => {
+      if (!frameCallbacks && video.readyState >= 2 && !video.seeking && video.currentTime !== lastTime) presented()
+    }
+    const repaint = () => {
+      waitingFrame = true
+      video.style.opacity = "0"
+      lastProgress = performance.now()
+      if (video.readyState >= 2 && !video.seeking) {
+        try { video.currentTime = Math.max(0, video.currentTime - 0.001) } catch {}
+      }
+    }
+    const restorePosition = () => {
+      if (resumeAt === null) return
+      const position = resumeAt
+      resumeAt = null
+      try {
+        video.currentTime = Number.isFinite(video.duration)
+          ? Math.min(position, Math.max(0, video.duration - 0.05)) : position
+      } catch {}
     }
     const synchronize = () => {
       if (!alive || failed) return
       const bounds = video.getBoundingClientRect()
       const visible = bounds.width > 0 && bounds.height > 0 && video.getClientRects().length > 0
       if (!motion.current || document.hidden || !intersecting || !visible || reduced?.matches) {
+        if (!suspended) suspendedAt = performance.now()
+        suspended = true
+        waitingFrame = true
         playRequest++
         playPending = false
-        video.pause()
+        if (!video.paused) video.pause()
         video.style.opacity = "0"
       }
       else {
-        video.style.opacity = video.readyState >= 2 ? "1" : "0"
+        if (suspended) {
+          suspended = false
+          lastProgress = performance.now()
+          if (lastProgress - suspendedAt >= 1500) repaint()
+        }
+        video.style.opacity = !waitingFrame && video.readyState >= 2 ? "1" : "0"
         if (!video.paused || playPending) return
         const request = ++playRequest
         playPending = true
@@ -321,11 +380,46 @@ export function BackgroundVideo(props: {
         else playPending = false
       }
     }
+    const wake = () => {
+      if (!suspended && blurredAt && performance.now() - blurredAt >= 1500) repaint()
+      blurredAt = 0
+      synchronize()
+    }
+    const blur = () => { blurredAt = performance.now() }
+    const checkPlayback = () => {
+      synchronize()
+      if (!alive || failed || suspended || performance.now() - lastProgress < 4000) return
+      // A decoder can stop presenting frames while paused remains false.
+      // Seek locally first, then reload the same source once before fallback.
+      if (recoveryCount >= 2) return fail()
+      recoveryCount++
+      lastRecovery = performance.now()
+      playRequest++
+      playPending = false
+      repaint()
+      if (recoveryCount === 2 || video.readyState < 2) {
+        resumeAt = video.currentTime
+        video.load()
+        if (frameCallbacks) {
+          if (frameRequest !== undefined) video.cancelVideoFrameCallback(frameRequest)
+          watchFrame()
+        }
+      }
+      console.info("[forever_companion] media playback: status=recovering attempt=%s", recoveryCount)
+      synchronize()
+    }
     syncPlayback.current = synchronize
     video.addEventListener("error", fail)
     video.addEventListener("loadeddata", synchronize)
+    video.addEventListener("loadedmetadata", restorePosition)
+    video.addEventListener("playing", progressed)
+    video.addEventListener("timeupdate", progressed)
+    video.addEventListener("seeked", progressed)
     document.addEventListener("visibilitychange", synchronize)
     window.addEventListener("resize", synchronize)
+    window.addEventListener("focus", wake)
+    window.addEventListener("pageshow", wake)
+    window.addEventListener("blur", blur)
     if (reduced?.addEventListener) reduced.addEventListener("change", synchronize)
     else if (reduced?.addListener) reduced.addListener(synchronize)
     const observer = typeof IntersectionObserver === "function"
@@ -335,19 +429,28 @@ export function BackgroundVideo(props: {
       }) : null
     observer?.observe(video)
     // Opaque hosted frames may be hidden by a parent without visibilitychange.
-    const visibilityTimer = setInterval(synchronize, 1000)
+    const visibilityTimer = setInterval(checkPlayback, 1000)
     video.src = props.media.url
     video.style.opacity = "0"
+    if (frameCallbacks) watchFrame()
     video.load()
     synchronize()
     return () => {
       alive = false
       clearInterval(visibilityTimer)
+      if (frameRequest !== undefined) video.cancelVideoFrameCallback(frameRequest)
       observer?.disconnect()
       video.removeEventListener("error", fail)
       video.removeEventListener("loadeddata", synchronize)
+      video.removeEventListener("loadedmetadata", restorePosition)
+      video.removeEventListener("playing", progressed)
+      video.removeEventListener("timeupdate", progressed)
+      video.removeEventListener("seeked", progressed)
       document.removeEventListener("visibilitychange", synchronize)
       window.removeEventListener("resize", synchronize)
+      window.removeEventListener("focus", wake)
+      window.removeEventListener("pageshow", wake)
+      window.removeEventListener("blur", blur)
       if (reduced?.removeEventListener) reduced.removeEventListener("change", synchronize)
       else if (reduced?.removeListener) reduced.removeListener(synchronize)
       syncPlayback.current = null

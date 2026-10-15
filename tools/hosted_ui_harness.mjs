@@ -184,6 +184,21 @@ async function inspectLayout(frame) {
 
 async function loadPage(browser, origin, parameters, width, height, theme, motion = "reduce") {
   const context = await browser.newContext({ viewport: { width, height }, colorScheme: theme, deviceScaleFactor: 1, reducedMotion: motion })
+  await context.addInitScript(() => {
+    window.qaCreatedVideos = []
+    const create = document.createElement.bind(document)
+    document.createElement = function(name, options) {
+      const element = create(name, options)
+      if (String(name).toLowerCase() === "video") {
+        window.qaCreatedVideos.push(element)
+        element.addEventListener("playing", () => {
+          if (!element.classList.contains("tm-bg-video") || window.qaFirstWallpaperFrameAt !== undefined) return
+          element.requestVideoFrameCallback(() => { window.qaFirstWallpaperFrameAt ??= performance.now() })
+        })
+      }
+      return element
+    }
+  })
   const page = await context.newPage()
   const errors = []
   page.on("pageerror", error => errors.push(error.message))

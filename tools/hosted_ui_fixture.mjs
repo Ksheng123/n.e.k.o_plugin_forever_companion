@@ -76,7 +76,7 @@ function calendarMonth(year, month) {
   return { year, month, label: `${year} / ${String(month).padStart(2, "0")}`, cells }
 }
 
-export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null, heat = "", diaryCase = "", moodCase = "" } = {}) {
+export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null, heat = "", diaryCase = "", moodCase = "", rpcDelay = 0, legacyGallery = false } = {}) {
   const appearance = { bg_id: wallpaper === "none" ? "" : wallpaper === "video" ? "qa-video" : "qa-wallpaper", fill: "cover", position: "center", blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100, glass: 0, card_alpha: 0, text_weight: 100, motion: true }
   const palettes = {
     olive: [[191, 185, 125], [125, 167, 191]],
@@ -258,7 +258,7 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     },
     appearance, image, images, gallery, videos, uploads: {}, videoSerial: 0,
     intros, journal, review, journalArchive, reviewArchive, diary, reviewProgress: { turns: 32, turns_threshold: 50, days: 4, days_threshold: 7, span: "2026-09-28~2026-10-02", due: false },
-    mediaStorage, heatmaps,
+    mediaStorage, heatmaps, rpcDelay, legacyGallery,
     stats: { heatmap: selectedHeat || { days: heatDays, start: "2026-04-01", end: "2026-10-01", years: [2026], year: 2026, months: [] }, months: ["2026-10", "2026-09", "2026-08"], month: { month: "2026-10", turns: 124, active_days: 2, busiest_day: TODAY, busiest_turns: 68, longest_streak: 2, cold_wars: 0, made_ups: 0, warm_moments: 3, tone: { happy: 72, neutral: 33, sad: 4 }, valence_avg: 0.24, voice: { ts: TODAY, mood: "warm", entry: SAMPLE.repeat(3) }, sealed: false } },
   }
 }
@@ -271,7 +271,8 @@ export function installFixtureBridge(fixture) {
   window.qaRefreshes = 0
   window.qaFailNext = ""
   window.qaResults = {}
-  window.qaDelays = {}
+  window.qaDelays = { get_panel_gallery: Number(fixture.rpcDelay), get_gallery_image: Number(fixture.rpcDelay) }
+  window.qaLegacyGallery = fixture.legacyGallery === "true"
   window.qaResolved = []
   window.qaFailVideoOp = ""
   window.qaFailVideoChunk = -1
@@ -399,7 +400,16 @@ export function installFixtureBridge(fixture) {
       state.mood.started_at = 0
       return { cleared: true }
     }
-    if (action === "get_panel_gallery") return { items: fixture.gallery, appearance: fixture.appearance, media_storage: mediaSummary() }
+    if (action === "get_panel_gallery") {
+      const result = { items: fixture.gallery, appearance: fixture.appearance, media_storage: mediaSummary() }
+      if (args.include_background && fixture.appearance.bg_id && !window.qaLegacyGallery) {
+        const id = fixture.appearance.bg_id
+        result.background = { id, media: dispatch("get_gallery_image", {
+          item_id: id, prefer_direct: args.prefer_direct && fixture.appearance.motion,
+        }) }
+      }
+      return result
+    }
     if (action === "get_gallery_image") {
       const video = fixture.videos[args.item_id]
       if (video) {

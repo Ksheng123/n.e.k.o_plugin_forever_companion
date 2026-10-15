@@ -94,7 +94,7 @@ class MediaGalleryMixin:
         await self._media_io(media_playback.clear, self, error="video_cleanup_incomplete")
         self._playback_verified.clear()
 
-    async def _prepare_playback(self, manifest: JsonObject) -> str:
+    async def _prepare_playback(self, manifest: JsonObject, summary: JsonObject | None = None) -> str:
         register = getattr(self, "register_static_ui", None)
         if manifest["storage"] != "file" or not callable(register):
             return ""
@@ -107,7 +107,8 @@ class MediaGalleryMixin:
                     return ""
                 self._playback_registered = True
                 self._playback_verified.clear()
-            summary = await self._media_storage_summary()
+            if summary is None:
+                summary = await self._media_storage_summary()
             cache_budget = max(0, summary["total_limit_bytes"] - summary["occupied_bytes"] + summary["playback_cache_bytes"])
             name, reused = await self._media_io(
                 media_playback.prepare, self, manifest, self._playback_verified,
@@ -639,13 +640,19 @@ class MediaGalleryMixin:
             if record.get("item_id") not in published:
                 pending += record["size"]
                 uploads += 1
+        def disk_summary():
+            root = media_files.safe_root(self)
+            files = media_files.inventory(root)
+            actual = sum(path.stat().st_size for path in files)
+            playback_bytes = media_playback.usage(self)
+            free, _total = media_files.disk_usage(root)
+            return actual, playback_bytes, free
+
         try:
-            root = await self._media_root()
-            files = await self._media_io(media_files.inventory, root, error="video_path_unsafe")
-            actual = await self._media_io(lambda: sum(path.stat().st_size for path in files))
-            playback_bytes = await self._media_io(media_playback.usage, self)
+            # One worker owns this read-only scan; repeated thread handoffs add
+            # noticeable latency to short-lived Hosted entry event loops.
+            actual, playback_bytes, free = await self._media_io(disk_summary)
             occupied = max(video_bytes + pending + reclaim, actual) + playback_bytes
-            free, _total = await self._media_io(media_files.disk_usage, root)
             available: int | None = max(0, free - _GALLERY_VIDEO_RESERVE_BYTES)
         except GalleryMediaError as exc:
             if exc.code != "video_path_unsafe":
@@ -872,7 +879,10 @@ class MediaGalleryMixin:
         self.logger.info("gallery video added: id={} mime={} bytes={}", item_id, record["mime"], record["size"])
         return Ok({"id": item_id, "items": index["items"]})
 
-    async def _video_get(self, item: JsonObject, chunk_index: Any, chunk_count: Any = None, prefer_direct: bool = False):
+    async def _video_get(
+        self, item: JsonObject, chunk_index: Any, chunk_count: Any = None,
+        prefer_direct: bool = False, *, storage_summary: JsonObject | None = None,
+    ):
         manifest = await self._video_manifest(item)
         if type(chunk_index) is not int:
             raise GalleryMediaError("video_chunk_invalid")
@@ -890,7 +900,7 @@ class MediaGalleryMixin:
                 "storage": manifest["storage"], "schema_version": 1,
             }
             if prefer_direct is True:
-                path = await self._prepare_playback(manifest)
+                path = await self._prepare_playback(manifest, storage_summary)
                 if path:
                     metadata["playback_path"] = path
             return Ok(metadata)

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 from forever_companion.core import media_files, media_playback
-from forever_companion.core.state import _GALLERY_VIDEO_CHUNK_BYTES
+from forever_companion.core.media import GalleryMediaError
+from forever_companion.core.state import _GALLERY_VIDEO_CHUNK_BYTES, _STORE_GALLERY_INDEX
 from tests.test_media_files import (
     add_video,
     begin,
@@ -72,6 +73,68 @@ def test_direct_is_opt_in_and_missing_sdk_keeps_blob_protocol(file_plugin):
         result = run(file_plugin, "get_gallery_image", item_id=gid, prefer_direct=preference)
         assert "playback_path" not in result.value
     assert calls == []
+
+
+def test_gallery_bootstrap_includes_selected_video_and_scans_storage_once(file_plugin, monkeypatch):
+    gid = add_video(file_plugin).value["id"]
+    run(file_plugin, "set_panel_appearance", bg_id=gid, motion=True)
+    calls = enable(file_plugin)
+    original = file_plugin._media_storage_summary
+    scans = []
+
+    async def summary(index=None):
+        scans.append(index)
+        return await original(index)
+
+    monkeypatch.setattr(file_plugin, "_media_storage_summary", summary)
+    file_plugin.store.calls.clear()
+    result = run(file_plugin, "get_panel_gallery", include_background=True, prefer_direct=True).value
+    assert result["background"]["id"] == gid
+    media = result["background"]["media"]
+    assert media["kind"] == "video" and media["playback_path"].endswith(".mp4")
+    assert len(calls) == 1
+    assert len(scans) == 1
+    assert sum(key == _STORE_GALLERY_INDEX for operation, key in file_plugin.store.calls if operation == "get") == 2
+    # The cleanup and snapshot share one guard; no third index/summary read for playback.
+    assert result["appearance"]["bg_id"] == gid
+    assert "background" not in run(file_plugin, "get_panel_gallery").value
+
+
+@pytest.mark.parametrize("motion,preference", [(False, True), (True, False), (True, "true")])
+def test_gallery_bootstrap_respects_static_and_reduced_motion(file_plugin, motion, preference):
+    gid = add_video(file_plugin).value["id"]
+    run(file_plugin, "set_panel_appearance", bg_id=gid, motion=motion)
+    calls = enable(file_plugin)
+    result = run(
+        file_plugin, "get_panel_gallery", include_background=True, prefer_direct=preference,
+    ).value
+    assert result["background"]["media"]["kind"] == "video"
+    assert "playback_path" not in result["background"]["media"]
+    assert calls == []
+
+
+def test_selected_video_bootstrap_failure_does_not_block_gallery(file_plugin, tm, monkeypatch):
+    gid = add_video(file_plugin).value["id"]
+    run(file_plugin, "set_panel_appearance", bg_id=gid)
+    async def unavailable(*_args, **_kwargs):
+        raise GalleryMediaError("video_read_failed")
+
+    monkeypatch.setattr(file_plugin, "_video_get", unavailable)
+    result = run(file_plugin, "get_panel_gallery", include_background=True)
+    assert isinstance(result, tm.Ok)
+    assert result.value["appearance"]["bg_id"] == gid
+    assert result.value["items"]
+    assert "background" not in result.value
+
+
+def test_gallery_bootstrap_returns_selected_image_and_keeps_body_out_by_default(file_plugin):
+    image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+    gid = run(file_plugin, "gallery_add", data_url=image, name="test.png").value["id"]
+    run(file_plugin, "set_panel_appearance", bg_id=gid)
+    result = run(file_plugin, "get_panel_gallery", include_background=True).value
+    assert result["background"]["id"] == gid
+    assert result["background"]["media"]["data_url"] == image
+    assert "background" not in run(file_plugin, "get_panel_gallery").value
 
 
 def test_registration_failure_falls_back_and_retries_on_next_open(file_plugin):
