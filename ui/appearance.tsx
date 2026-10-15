@@ -1,12 +1,12 @@
-// 面板外观卡（1.2.0）：图片图库 + 可调背景。
+// 面板外观：分类壁纸库、导入、背景调节与媒体存储。
 // 图库（入册/删除/缩略图）由 panel.tsx 经 gallery_* 入口即时落盘；
 // "用哪张 + 十项调节"是 draft 参数——实时预览，落盘交给设置页底部那枚「保存设置」
 // （1.3.2：卡内不再自设保存钮，一页两个"保存"会让人以为外观改丢了）。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；不支持 <svg>（九宫格/占位图纯 CSS）
-import { Alert, Button, Card, Field, ImageUpload, Progress, SegmentedControl, Slider } from "@neko/plugin-ui"
+import { Alert, Button, Field, ImageUpload, Progress, SegmentedControl, Slider } from "@neko/plugin-ui"
 import { useEffect, useRef, useState } from "@neko/plugin-ui"
 import type { Appearance, GalleryItem, MediaStorage, TFunc } from "./types"
-import { APPEARANCE_POSITIONS, appearanceEquals, compressImageDataUrl, errorText } from "./utils"
+import { APPEARANCE_POSITIONS, appearanceEquals, compressImageDataUrl, errorText, navigateTabs } from "./utils"
 import { readFileDataUrl, VIDEO_MAX_BYTES } from "./media"
 import { scanWallpaperFiles } from "./wallpaper_import"
 import type { WallpaperCandidate, WallpaperScan } from "./wallpaper_import"
@@ -41,6 +41,9 @@ export function AppearanceCard(props: {
   const { t, items, draft, saved, theme, themeFromWallpaper, uploading, onDraft, onRevert, onAdd, onAskRemove, mediaStorage } = props
   // 压缩档只影响"怎么入册"，不是面板状态，留在卡内；上传错误本地化同前
   const [quality, setQuality] = useState<string>("auto")
+  const [mediaKind, setMediaKind] = useState("image")
+  const [importKind, setImportKind] = useState("image")
+  const initialFilter = useRef(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [scan, setScan] = useState<WallpaperScan | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -55,7 +58,19 @@ export function AppearanceCard(props: {
   const hasBg = draft.bg_id !== ""
   const videoSelected = items.some((item) => item.id === draft.bg_id && item.kind === "video")
   const busy = uploading || localBusy
-  const noImage = items.length === 0
+  const imageCount = items.filter((item) => item.kind !== "video").length
+  const videoCount = items.length - imageCount
+  const visibleItems = items.filter((item) => (item.kind === "video" ? "video" : "image") === mediaKind)
+  const noImage = imageCount === 0
+  const mediaTabs = [
+    { id: "image", label: t("panel.appearance.images", { defaultValue: "图片" }), count: imageCount },
+    { id: "video", label: t("panel.appearance.videos", { defaultValue: "视频" }), count: videoCount },
+  ]
+  useEffect(() => {
+    if (initialFilter.current || !items.length) return
+    initialFilter.current = true
+    setMediaKind(videoSelected ? "video" : "image")
+  }, [items, draft.bg_id])
   useEffect(() => {
     if (!mediaStorage) return
     setSingleLimit(Math.round(mediaStorage.single_limit_bytes / 1048576))
@@ -109,9 +124,18 @@ export function AppearanceCard(props: {
         return false
       }
       if (!alive.current) return false
-      return await onAdd(res.dataUrl, res.thumb, name)
+      const success = await onAdd(res.dataUrl, res.thumb, name)
+      if (alive.current && success) {
+        initialFilter.current = true
+        setMediaKind("image")
+      }
+      return success
     } catch (error) {
-      if (alive.current && mime === "image/svg+xml") return await onAdd(url, "", name)
+      if (alive.current && mime === "image/svg+xml") {
+        const success = await onAdd(url, "", name)
+        if (alive.current && success) { initialFilter.current = true; setMediaKind("image") }
+        return success
+      }
       if (alive.current) setUploadError(errorText("wallpaper_image_decode_failed", t))
       return false
     } finally {
@@ -124,7 +148,8 @@ export function AppearanceCard(props: {
     event.currentTarget.value = ""
     if (!file || busy) return
     setUploadError(null)
-    await props.onAddVideo(file, file.name)
+    const success = await props.onAddVideo(file, file.name)
+    if (alive.current && success) { initialFilter.current = true; setMediaKind("video") }
   }
 
   async function chooseDirectory(event: any) {
@@ -168,18 +193,35 @@ export function AppearanceCard(props: {
         if (alive.current) setUploadError(errorText(error, t))
       }
     }
-    if (alive.current && success) setImported((previous) => ({ ...previous, [candidate.key]: true }))
+    if (alive.current && success) {
+      setImported((previous) => ({ ...previous, [candidate.key]: true }))
+      initialFilter.current = true
+      setMediaKind(candidate.kind)
+    }
   }
 
   return (
-    <Card title={t("panel.appearance.title", { defaultValue: "面板外观" })}>
+    <section className="tm-settings-section">
+      <h3>{t("panel.appearance.title", { defaultValue: "面板外观" })}</h3>
       <div className="tm-appearance">
-        <div className="tm-derived">
-          {t("panel.appearance.hint", { defaultValue: "图片保存在本地图库。选择壁纸和调整效果后，可预览外观；点击「保存设置」后生效。" })}
+        <div className="tm-wallpaper-current">
+          <span>{t("panel.appearance.current", { defaultValue: "当前壁纸" })}</span>
+          <strong>{items.find((item) => item.id === draft.bg_id)?.name || (hasBg
+            ? t("panel.appearance.legacyName", { defaultValue: "旧的背景图" }) : noWallpaperLabel)}</strong>
         </div>
 
         {/* —— 图库：网格选择 + 导入 + 删除（即时落盘，不经保存钮） —— */}
-        <Field label={t("panel.appearance.gallery", { defaultValue: "图片图库" })}>
+        <div className="tm-media-tabs" role="tablist" aria-label={t("panel.appearance.library", { defaultValue: "壁纸库" })}>
+          {mediaTabs.map((item) => (
+            <button key={item.id} type="button" role="tab" className="tm-media-tab"
+              id={`tm-media-tab-${item.id}`} aria-selected={mediaKind === item.id ? "true" : "false"}
+              aria-controls="tm-media-gallery" tabIndex={mediaKind === item.id ? 0 : -1}
+              onKeyDown={navigateTabs} onClick={() => { initialFilter.current = true; setMediaKind(item.id) }}>
+              <span>{item.label}</span><span className="tm-media-count">{item.count}</span>
+            </button>
+          ))}
+        </div>
+        <div id="tm-media-gallery" role="tabpanel" aria-labelledby={`tm-media-tab-${mediaKind}`} tabIndex={0}>
           <div className="tm-gallery">
             <div
               className={noneClass}
@@ -197,7 +239,7 @@ export function AppearanceCard(props: {
                 {!hasBg && !noneApplied ? <span className="tm-gallery-use">{previewingLabel}</span> : noneApplied ? <span className="tm-gallery-use">{appliedLabel}</span> : null}
               </button>
             </div>
-            {items.map((item) => {
+            {visibleItems.map((item) => {
               const id = String(item.id || "")
               const active = id !== "" && id === draft.bg_id
               const applied = id !== "" && id === saved.bg_id
@@ -213,6 +255,7 @@ export function AppearanceCard(props: {
                 <div
                   key={id}
                   data-item-id={id}
+                  data-media-kind={item.kind === "video" ? "video" : "image"}
                   className={thumb ? tileClass : `${tileClass} tm-gallery-thumbless`}
                 >
                   <button
@@ -239,10 +282,25 @@ export function AppearanceCard(props: {
               )
             })}
           </div>
-        </Field>
+          {visibleItems.length === 0 ? <div className="tm-gallery-empty" role="status">
+            {mediaKind === "video"
+              ? t("panel.appearance.emptyVideos", { defaultValue: "还没有视频壁纸" })
+              : t("panel.appearance.emptyImages", { defaultValue: "还没有图片壁纸" })}
+          </div> : null}
+        </div>
 
         {props.backgroundError ? <Alert tone="warning" message={props.backgroundError} /> : null}
+        {uploadError ? <Alert tone="danger" message={uploadError} /> : null}
+        <details className="tm-settings-disclosure tm-media-add">
+          <summary>{t("panel.appearance.addMedia", { defaultValue: "导入壁纸" })}</summary>
+          <div className="tm-settings-disclosure-body">
+          <SegmentedControl value={importKind} options={[
+            { value: "image", label: t("panel.appearance.images", { defaultValue: "图片" }) },
+            { value: "video", label: t("panel.appearance.videos", { defaultValue: "视频" }) },
+            { value: "directory", label: "Wallpaper Engine" },
+          ]} onChange={(value: any) => setImportKind(String(value))} />
         <div className={busy ? "tm-media-import tm-media-import-busy" : "tm-media-import"}>
+        <div className="tm-media-import-fields" hidden={importKind !== "image"}>
         <Field
           label={t("panel.appearance.modeLabel", { defaultValue: "导入方式" })}
           help={t("panel.appearance.modeHelp", { defaultValue: "自动压缩将图片长边缩至最多 2560 像素，并重新编码。GIF / SVG 保留原文件。" })}
@@ -259,7 +317,6 @@ export function AppearanceCard(props: {
         <Field
           label={t("panel.appearance.upload", { defaultValue: "导入图片" })}
           help={noImage ? t("panel.appearance.galleryEmptyHint", { defaultValue: "暂无图片" }) : t("panel.appearance.uploadHelp", { defaultValue: "支持 PNG / JPG / WebP / GIF / SVG。原画质文件不能超过 4MB。" })}
-          error={uploadError || undefined}
         >
           <ImageUpload
             value={undefined}
@@ -270,6 +327,8 @@ export function AppearanceCard(props: {
             onError={(error) => { setUploadError(localizeUploadError(t, error)) }}
           />
         </Field>
+        </div>
+        <div hidden={importKind !== "video"}>
         <Field label={t("panel.appearance.videoImport")} help={t("panel.appearance.videoLimit", {
           n: mediaStorage ? Math.round(mediaStorage.single_limit_bytes / 1048576) : VIDEO_MAX_BYTES / 1048576,
           total: mediaStorage ? Math.round(mediaStorage.total_limit_bytes / 1048576) : 128,
@@ -277,54 +336,16 @@ export function AppearanceCard(props: {
           <input type="file" className="tm-wallpaper-video-input" accept=".mp4,.webm,video/mp4,video/webm"
             disabled={busy || scanning} aria-label={t("panel.appearance.videoImport")} onChange={chooseVideo} />
         </Field>
-        <Field label={t("panel.appearance.storageTitle", { defaultValue: "壁纸存储" })}>
-          <div className="tm-media-storage">
-            <div className="tm-derived">
-              {mediaStorage
-                ? t("panel.appearance.storageUsage", { defaultValue: "已占用 {used} MiB / {total} MiB", used: Math.ceil(mediaStorage.occupied_bytes / 1048576), total: Math.ceil(mediaStorage.total_limit_bytes / 1048576) })
-                : t("panel.appearance.storageLegacy", { defaultValue: "当前宿主未提供可调整的壁纸容量信息。" })}
-            </div>
-            {mediaStorage ? (
-              <>
-                <div className="tm-derived">
-                  {t("panel.appearance.storagePending", { defaultValue: "暂存 {pending} MiB", pending: Math.ceil((mediaStorage.pending_bytes + mediaStorage.reclaim_bytes) / 1048576) })}
-                  {mediaStorage.available_bytes !== null
-                    ? ` · ${t("panel.appearance.storageFree", { defaultValue: "磁盘可用 {free} MiB", free: Math.ceil(mediaStorage.available_bytes / 1048576) })}`
-                    : ""}
-                </div>
-                {mediaStorage.storage_reclaim_pending || mediaStorage.cleanup_pending
-                  ? <Alert tone={mediaStorage.cleanup_pending ? "warning" : "info"} message={mediaStorage.cleanup_pending
-                    ? t("panel.appearance.cleanupPending", { defaultValue: "仍有媒体数据等待清理，请关闭占用文件的程序后重试。" })
-                    : t("panel.appearance.storageReclaimPending", { defaultValue: "媒体条目已清除；数据库文件大小可能暂时不变。" })} />
-                  : null}
-                <div className="tm-media-policy">
-                  <label>
-                    <span>{t("panel.appearance.singleLimit", { defaultValue: "单个视频上限（MiB）" })}</span>
-                    <input type="number" min={32} max={512} step={1} value={singleLimit}
-                      disabled={busy} onChange={(event: any) => setSingleLimit(Number(event.currentTarget.value))} />
-                  </label>
-                  <label>
-                    <span>{t("panel.appearance.totalLimit", { defaultValue: "视频库预算（MiB）" })}</span>
-                    <input type="number" min={64} max={16384} step={1} value={totalLimit}
-                      disabled={busy} onChange={(event: any) => setTotalLimit(Number(event.currentTarget.value))} />
-                  </label>
-                  <Button disabled={busy || (singleLimit === Math.round(mediaStorage.single_limit_bytes / 1048576) && totalLimit === Math.round(mediaStorage.total_limit_bytes / 1048576))}
-                    onClick={() => { void props.onUpdateVideoPolicy(singleLimit, totalLimit) }}>
-                    {t("panel.appearance.policySave", { defaultValue: "更新容量" })}
-                  </Button>
-                </div>
-                <Button tone="danger" disabled={busy} onClick={() => { void props.onClearMedia() }}>
-                  {t("panel.appearance.clearMedia", { defaultValue: "清空壁纸与缓存" })}
-                </Button>
-              </>
-            ) : null}
-          </div>
-        </Field>
+        </div>
+        <div hidden={importKind !== "directory"}>
         <Field label={t("panel.appearance.directoryImport")} help={t("panel.appearance.directoryLimit")}>
           <input type="file" className="tm-wallpaper-directory-input" webkitdirectory="" multiple
             disabled={busy || scanning} aria-label={t("panel.appearance.directoryImport")} onChange={chooseDirectory} />
         </Field>
         </div>
+        </div>
+        </div>
+        </details>
         {props.videoProgress ? (
           <div className="tm-video-progress" role="status" aria-live="polite">
             <Progress value={props.videoProgress.value}
@@ -457,6 +478,51 @@ export function AppearanceCard(props: {
           </div>
         </details>
 
+        <details className="tm-settings-disclosure tm-media-storage-disclosure">
+          <summary>{t("panel.appearance.storageTitle", { defaultValue: "壁纸存储" })}</summary>
+          <div className="tm-settings-disclosure-body tm-media-storage">
+            <div className="tm-derived">
+              {mediaStorage
+                ? t("panel.appearance.storageUsage", { defaultValue: "已占用 {used} MiB / {total} MiB", used: Math.ceil(mediaStorage.occupied_bytes / 1048576), total: Math.ceil(mediaStorage.total_limit_bytes / 1048576) })
+                : t("panel.appearance.storageLegacy", { defaultValue: "当前宿主未提供可调整的壁纸容量信息。" })}
+            </div>
+            {mediaStorage ? (
+              <>
+                <div className="tm-derived">
+                  {t("panel.appearance.storagePending", { defaultValue: "暂存 {pending} MiB", pending: Math.ceil((mediaStorage.pending_bytes + mediaStorage.reclaim_bytes) / 1048576) })}
+                  {mediaStorage.available_bytes !== null
+                    ? ` · ${t("panel.appearance.storageFree", { defaultValue: "磁盘可用 {free} MiB", free: Math.ceil(mediaStorage.available_bytes / 1048576) })}`
+                    : ""}
+                </div>
+                {mediaStorage.storage_reclaim_pending || mediaStorage.cleanup_pending
+                  ? <Alert tone={mediaStorage.cleanup_pending ? "warning" : "info"} message={mediaStorage.cleanup_pending
+                    ? t("panel.appearance.cleanupPending", { defaultValue: "仍有媒体数据等待清理，请关闭占用文件的程序后重试。" })
+                    : t("panel.appearance.storageReclaimPending", { defaultValue: "媒体条目已清除；数据库文件大小可能暂时不变。" })} />
+                  : null}
+                <div className="tm-media-policy">
+                  <label>
+                    <span>{t("panel.appearance.singleLimit", { defaultValue: "单个视频上限（MiB）" })}</span>
+                    <input type="number" min={32} max={512} step={1} value={singleLimit}
+                      disabled={busy} onChange={(event: any) => setSingleLimit(Number(event.currentTarget.value))} />
+                  </label>
+                  <label>
+                    <span>{t("panel.appearance.totalLimit", { defaultValue: "视频库预算（MiB）" })}</span>
+                    <input type="number" min={64} max={16384} step={1} value={totalLimit}
+                      disabled={busy} onChange={(event: any) => setTotalLimit(Number(event.currentTarget.value))} />
+                  </label>
+                  <Button disabled={busy || (singleLimit === Math.round(mediaStorage.single_limit_bytes / 1048576) && totalLimit === Math.round(mediaStorage.total_limit_bytes / 1048576))}
+                    onClick={() => { void props.onUpdateVideoPolicy(singleLimit, totalLimit) }}>
+                    {t("panel.appearance.policySave", { defaultValue: "更新容量" })}
+                  </Button>
+                </div>
+                <Button tone="danger" disabled={busy} onClick={() => { void props.onClearMedia() }}>
+                  {t("panel.appearance.clearMedia", { defaultValue: "清空壁纸与缓存" })}
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </details>
+
         {/* 待存读数 + 还原：真正的落盘在页面底部那条「保存设置」上 */}
         <div className="tm-appearance-save">
           <span className="tm-save-hint">
@@ -464,12 +530,16 @@ export function AppearanceCard(props: {
               ? t("panel.appearance.unsavedHint", { defaultValue: "有未保存的外观调整" })
               : t("panel.appearance.savedHint", { defaultValue: "外观已保存" })}
           </span>
-          <Button tone="default" disabled={!dirty} onClick={onRevert}>
+          <Button tone="default" disabled={!dirty} onClick={() => {
+            initialFilter.current = true
+            setMediaKind(items.some((item) => item.id === saved.bg_id && item.kind === "video") ? "video" : "image")
+            onRevert()
+          }}>
             {t("panel.appearance.revert", { defaultValue: "还原" })}
           </Button>
         </div>
       </div>
-    </Card>
+    </section>
   )
 }
 

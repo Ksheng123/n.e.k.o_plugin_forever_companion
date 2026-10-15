@@ -4,6 +4,18 @@ import type { Appearance, FormValues, Settings, Status, TFunc } from "./types"
 
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
+export function navigateTabs(event: any): void {
+  const keys = ["ArrowLeft", "ArrowRight", "Home", "End"]
+  if (!keys.includes(event.key)) return
+  const tabs = Array.from(event.currentTarget.parentElement.querySelectorAll('[role="tab"]')) as HTMLButtonElement[]
+  const index = tabs.indexOf(event.currentTarget)
+  const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+    : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
+  event.preventDefault()
+  tabs[next]?.focus()
+  tabs[next]?.click()
+}
+
 // 面板展示层去 emoji：情绪动作标签带 emoji 是给模型辨语气用的（后端不动），
 // 面板渲染前统一剔掉，保持纯文字观感；仅去图形符号区，不动正常文字与标点
 export function stripEmoji(text?: string): string {

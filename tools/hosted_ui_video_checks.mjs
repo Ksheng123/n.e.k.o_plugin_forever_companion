@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { openImport, openStorage, selectMedia } from "./hosted_ui_settings_checks.mjs"
 
 const VIDEO = "video.tm-bg-video"
 const VIDEO_INPUT = "input.tm-wallpaper-video-input"
@@ -169,6 +170,7 @@ async function installResourceProbe(frame) {
 }
 
 async function pick(frame, id) {
+  await selectMedia(frame, id.startsWith("qa-video") ? "video" : "image")
   await frame.locator(`.tm-gallery-tile[data-item-id="${id}"] .tm-gallery-pick`).click()
 }
 
@@ -245,11 +247,19 @@ async function reopen(loaded) {
   await loaded.frame.waitForSelector(".tm-tabs")
   await loaded.frame.waitForTimeout(250)
   await loaded.frame.locator(".tm-tab").nth(7).click()
+  await openImport(loaded.frame, "video")
+  await openStorage(loaded.frame)
   return result
 }
 
 export async function videoChecks(browser, sources, origin, output, helpers) {
-  const { loadPage, inspectLayout, pluginRoot, loadDependency } = helpers
+  const { loadPage: createPage, inspectLayout, pluginRoot, loadDependency } = helpers
+  async function loadPage(...args) {
+    const loaded = await createPage(...args)
+    await openImport(loaded.frame, "video")
+    await openStorage(loaded.frame)
+    return loaded
+  }
   const screenshots = []
   const checks = []
   const fixture = await recordFixture(browser, output)
@@ -267,6 +277,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
   }
 
   async function capture(loaded, id, focus = VIDEO_INPUT) {
+    if (focus === VIDEO_INPUT) await openImport(loaded.frame, "video")
     await loaded.frame.locator(focus).scrollIntoViewIfNeeded()
     const layout = await inspectLayout(loaded.frame)
     const diagnostics = await loaded.page.evaluate(() => window.qaDiagnostics.filter(message => message.type === "neko-hosted-surface-error"))
@@ -447,6 +458,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
           return window.qaFixture.gallery.length
         })
         if (mutation === "clear") {
+          await openStorage(interruptedReceipt.frame)
           await interruptedReceipt.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
         }
         await interruptedReceipt.frame.locator(VIDEO_INPUT).setInputFiles(fixture.assetPath)
@@ -680,6 +692,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       }, before)
       importedId = record.item.id
       assert.equal(record.item.kind, "video")
+      assert.equal(await loaded.frame.locator("#tm-media-tab-video").getAttribute("aria-selected"), "true")
       assert.equal(record.item.size, fixture.size)
       assert.equal(record.uploadCount, 0)
       assert.equal(record.calls[0].op, "video_begin")
@@ -758,6 +771,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       writeFileSync(join(directory, "project.json"), JSON.stringify({ type: "video", file: "wallpaper.webm", title: "QA WE motion" }))
       writeFileSync(join(directory, "wallpaper.webm"), readFileSync(fixture.assetPath))
       const before = await loaded.page.evaluate(() => window.qaFixture.gallery.length)
+      await openImport(loaded.frame, "directory")
       await loaded.frame.locator(DIRECTORY_INPUT).setInputFiles(directory)
       await loaded.frame.waitForSelector(".tm-wallpaper-candidate")
       assert.equal(await loaded.frame.locator(".tm-wallpaper-candidate").count(), 1)
@@ -822,6 +836,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       assert.equal(await restoring.page.evaluate(id => window.qaResolved.some(value => value.requestId === id), request), false,
         "Poster/progress was checked only after the delayed chunk arrived")
       assert.equal(await restoring.frame.locator(VIDEO_INPUT).isDisabled(), false, "Background loading disabled unrelated imports")
+      await openStorage(restoring.frame)
       await restoring.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
       await restoring.frame.getByRole("button", { name: sources.messages.en["panel.cancel"], exact: true }).last().click()
       await capture(restoring, "video-reopen-poster-loading")
@@ -851,9 +866,12 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       assert.equal(await restoring.frame.locator(".tm-video-loading").count(), 0, "Cancelled background retained its loading indicator")
       assert((await restoring.frame.locator(".tm-bg-image").evaluate(element => element.style.backgroundImage))
         .includes(await restoring.page.evaluate(() => window.qaFixture.images["qa-wallpaper"])))
-      const laterReads = await restoring.page.evaluate(({ offset, first }) => window.qaMessages.slice(offset).filter(message => message.payload?.actionId === "get_gallery_image"
-        && message.payload.args.item_id === "qa-video" && message.payload.args.chunk_index >= 0
-        && message.requestId !== first).length, { offset: start, first: request })
+      const laterReads = await restoring.page.evaluate(({ offset, first }) => {
+        const cancelledAt = window.qaCancelledRequests.find(value => value.requestId === first).at
+        return window.qaMessages.slice(offset).filter(message => message.payload?.actionId === "get_gallery_image"
+          && message.payload.args.item_id === "qa-video" && message.payload.args.chunk_index >= 0
+          && message.receivedAt > cancelledAt).length
+      }, { offset: start, first: request })
       assert.equal(laterReads, 0, "Cancelled download continued sending later chunks")
     }, { realBrowser: true, race: "A written first-read result is delivered after a different wallpaper is selected; it cannot resume download or revive the old video." })
   } finally { await restoring.context.close() }
@@ -887,6 +905,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
           await pick(pending.frame, "qa-wallpaper")
           await pending.frame.waitForSelector('.tm-gallery-tile[data-item-id="qa-wallpaper"].tm-gallery-active')
         } else if (mutation === "clear") {
+          await openStorage(pending.frame)
           await pending.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
           await pending.frame.getByRole("button", { name: sources.messages.en["panel.confirm"], exact: true }).last().click()
           await pending.page.waitForFunction(() => window.qaFixture.gallery.length === 0)
@@ -898,9 +917,12 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
           await pending.frame.waitForTimeout(180)
           assert(await pending.page.evaluate(id => window.qaCancelledRequests.some(value => value.requestId === id), delayedRead),
             "Clear or unmount did not cancel its active hosted read")
-          const laterChunks = await pending.page.evaluate(first => window.qaMessages.filter(message => message.payload?.actionId === "get_gallery_image"
-            && message.payload.args.item_id === "qa-video" && message.payload.args.chunk_index >= 0
-            && message.requestId !== first).length, delayedRead)
+          const laterChunks = await pending.page.evaluate(first => {
+            const cancelledAt = window.qaCancelledRequests.find(value => value.requestId === first).at
+            return window.qaMessages.filter(message => message.payload?.actionId === "get_gallery_image"
+              && message.payload.args.item_id === "qa-video" && message.payload.args.chunk_index >= 0
+              && message.receivedAt > cancelledAt).length
+          }, delayedRead)
           assert.equal(laterChunks, 0, "Clear or unmount let a delayed background request resume")
           assert.equal(await pending.frame.locator(".tm-bg").count(), 0, "Late read revived the cleared or unmounted background")
         }
@@ -961,6 +983,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       await pick(clearing.frame, "qa-video")
       await assertMoving(clearing.frame)
       const before = await clearing.page.evaluate(() => JSON.stringify({ gallery: window.qaFixture.gallery, diary: window.qaFixture.diary, journal: window.qaFixture.journal, review: window.qaFixture.review }))
+      await openStorage(clearing.frame)
       await clearing.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
       await clearing.frame.getByRole("button", { name: sources.messages.en["panel.cancel"], exact: true }).last().click()
       assert.equal(await clearing.page.evaluate(() => JSON.stringify({ gallery: window.qaFixture.gallery, diary: window.qaFixture.diary, journal: window.qaFixture.journal, review: window.qaFixture.review })), before)
@@ -968,6 +991,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
     })
     await check("video-clear-failure-does-not-report-success-or-leak-cached-playback", async () => {
       await clearing.page.evaluate(() => { window.qaFailNext = "gallery_remove" })
+      await openStorage(clearing.frame)
       await clearing.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
       await clearing.frame.getByRole("button", { name: sources.messages.en["panel.confirm"], exact: true }).last().click()
       await clearing.frame.waitForSelector('.neko-toast[data-tone="danger"]')
@@ -982,6 +1006,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
     })
     await check("video-clear-confirm-releases-files-blobs-and-cancels-late-downloads", async () => {
       const directory = join(output, "we-project")
+      await openImport(clearing.frame, "directory")
       await clearing.frame.locator(DIRECTORY_INPUT).setInputFiles(directory)
       await clearing.frame.waitForSelector(".tm-wallpaper-candidate")
       const before = await clearing.page.evaluate(() => {
@@ -990,6 +1015,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       })
       await pick(clearing.frame, "qa-wallpaper-b")
       await clearing.page.waitForFunction(() => window.qaMessages.some(message => message.method === "call" && message.payload.actionId === "get_gallery_image" && message.payload.args.item_id === "qa-wallpaper-b"))
+      await openStorage(clearing.frame)
       await clearing.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
       await clearing.frame.getByRole("button", { name: sources.messages.en["panel.confirm"], exact: true }).last().click()
       await clearing.page.waitForFunction(() => window.qaFixture.gallery.length === 0)
@@ -1023,6 +1049,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
         assert.equal(await delayedSnapshot.page.evaluate(id => window.qaResolved.some(value => value.requestId === id), snapshotRequest), false,
           "The initial gallery response arrived before the mutation; this did not exercise the race")
         if (mutation === "clear") {
+          await openStorage(delayedSnapshot.frame)
           await delayedSnapshot.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
           await delayedSnapshot.frame.getByRole("button", { name: sources.messages.en["panel.confirm"], exact: true }).last().click()
           await delayedSnapshot.page.waitForFunction(() => window.qaFixture.gallery.length === 0)
@@ -1030,7 +1057,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
         }
         await delayedSnapshot.page.waitForFunction(id => window.qaResolved.some(value => value.requestId === id), snapshotRequest, { timeout: 10000 })
         await delayedSnapshot.frame.waitForTimeout(180)
-        assert.equal(await delayedSnapshot.frame.locator(".tm-gallery-tile[data-item-id]").count(), mutation === "clear" ? 0 : 5,
+        assert.equal(await delayedSnapshot.frame.locator(".tm-gallery-tile[data-item-id]").count(), mutation === "clear" ? 0 : 2,
           "A late initial snapshot resurrected cleared media or discarded the new wallpaper")
         if (mutation === "clear") {
           assert.equal(await delayedSnapshot.frame.locator(".tm-bg").count(), 0, "A late saved appearance resurrected the cleared background")
@@ -1056,6 +1083,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       await pick(deletingOther.frame, "qa-video")
       await deletingOther.page.waitForFunction(start => window.qaMessages.slice(start).some(message => message.method === "call"
         && message.payload.actionId === "get_gallery_image" && message.payload.args.item_id === "qa-video" && message.payload.args.chunk_index === 0), offset)
+      await selectMedia(deletingOther.frame, "image")
       await deletingOther.frame.locator('.tm-gallery-tile[data-item-id="qa-wallpaper-b"] .tm-gallery-del').click()
       await deletingOther.frame.getByRole("button", { name: sources.messages.en["panel.confirm"], exact: true }).last().click()
       await deletingOther.frame.waitForSelector('.tm-gallery-tile[data-item-id="qa-wallpaper-b"]', { state: "detached" })
@@ -1068,6 +1096,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
       assert(requestCount >= 2, "Deleting another item did not restart the selected video's invalidated download")
       await assertMoving(deletingOther.frame)
       assert.equal(await deletingOther.page.evaluate(() => window.qaFixture.appearance.bg_id), "qa-video")
+      await selectMedia(deletingOther.frame, "video")
       assert.equal(await deletingOther.frame.locator('.tm-gallery-tile[data-item-id="qa-video"].tm-gallery-active').count(), 1)
       await capture(deletingOther, "video-delete-other-during-download")
     }, { realBrowser: true, race: "Production-sized selected-video chunk is delayed while an unrelated image is deleted through the real confirmation dialog" })
@@ -1083,6 +1112,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
         return window.qaMessages.length
       })
       // Confirm is deliberately left open while native file selection starts.
+      await openStorage(uploadClearing.frame)
       await uploadClearing.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).click()
       await uploadClearing.frame.locator(VIDEO_INPUT).setInputFiles(fixture.assetPath)
       await uploadClearing.page.waitForFunction(start => window.qaMessages.slice(start).some(message => message.method === "call"
@@ -1099,7 +1129,7 @@ export async function videoChecks(browser, sources, origin, output, helpers) {
           "Clear already finished before the disabled-control probe")
         assert.equal(await uploadClearing.frame.locator(VIDEO_INPUT).isDisabled(), true, "Upload finally reopened video import while clear was pending")
         assert.equal(await uploadClearing.frame.locator(DIRECTORY_INPUT).isDisabled(), true, "Upload finally reopened directory import while clear was pending")
-        assert.equal(await uploadClearing.frame.getByRole("button", { name: sources.messages.en["panel.appearance.clearMedia"], exact: true }).isDisabled(), true)
+        assert.equal(await uploadClearing.frame.locator('.tm-media-storage button[data-tone="danger"]').isDisabled(), true)
         assert.equal(await uploadClearing.frame.locator(".neko-image-upload").evaluate(element => getComputedStyle(element).pointerEvents), "none",
           "Image import became pointer-active while clear was pending")
         await uploadClearing.frame.waitForTimeout(220)

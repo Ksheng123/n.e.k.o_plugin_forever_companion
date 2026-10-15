@@ -1,10 +1,9 @@
-// 设置页：通用设置（时区/调试模式）+ 面板外观 + 危险区（重置全部数据）
-// + 已有状态的角色名单（孤儿清理）。全局杂项归位页——原「管理」页。
-import { Card, Field, Select, StatusBadge, Button } from "@neko/plugin-ui"
+// Keep settings sections mounted so switching views preserves drafts and imports.
+import { Field, Select, StatusBadge, Button, useState } from "@neko/plugin-ui"
 import { TmSwitch } from "./tmswitch"
 import type { HostedAction } from "@neko/plugin-ui"
 import type { FormValues, LanlanItem, TFunc } from "./types"
-import { lanlanPhaseLabel, moodBadgeTone } from "./utils"
+import { lanlanPhaseLabel, moodBadgeTone, navigateTabs } from "./utils"
 
 export function ManagePane(props: {
   t: TFunc
@@ -26,6 +25,12 @@ export function ManagePane(props: {
   footer?: any
 }) {
   const { t, form, updateForm, resetAll, onResetAll, lanlanList, lanlan, canPrune, onPruneLanlan, onReopenGuide } = props
+  const [section, setSection] = useState("appearance")
+  const sections = [
+    { id: "appearance", label: t("panel.settings.viewAppearance", { defaultValue: "外观与壁纸" }) },
+    { id: "general", label: t("panel.settings.sectionGeneral", { defaultValue: "通用" }) },
+    { id: "data", label: t("panel.settings.viewData", { defaultValue: "数据管理" }) },
+  ]
 
   const timezoneOptions = [
     { value: "auto", label: t("panel.settings.tzAuto", { defaultValue: "自动（跟随系统）" }) },
@@ -40,40 +45,56 @@ export function ManagePane(props: {
   ]
 
   return (
-    <div className="tm-pane">
-      {/* 通用：时区与调试（跟保存条走，但独立成卡放设置页） */}
-      <Card title={t("panel.settings.sectionGeneral", { defaultValue: "通用" })}>
+    <div className="tm-pane tm-settings">
+      <div className="tm-settings-surface">
+      <div className="tm-settings-nav" role="tablist" aria-label={t("panel.tab.settings", { defaultValue: "设置" })}>
+        {sections.map((item) => (
+          <button key={item.id} type="button" role="tab" id={`tm-settings-tab-${item.id}`}
+            className="tm-settings-tab" aria-selected={section === item.id ? "true" : "false"}
+            aria-controls={`tm-settings-${item.id}`} tabIndex={section === item.id ? 0 : -1}
+            onKeyDown={navigateTabs} onClick={() => setSection(item.id)}>
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div id="tm-settings-appearance" role="tabpanel" aria-labelledby="tm-settings-tab-appearance"
+        hidden={section !== "appearance"} tabIndex={0}>
+        {props.children}
+      </div>
+
+      <div id="tm-settings-general" role="tabpanel" aria-labelledby="tm-settings-tab-general"
+        hidden={section !== "general"} tabIndex={0}>
+      <section className="tm-settings-section">
+        <h3>{t("panel.settings.sectionGeneral", { defaultValue: "通用" })}</h3>
         <div className="tm-derived">
           {t("panel.settings.sectionGlobalHint", { defaultValue: "以下设置对所有角色生效" })}
         </div>
         <Field label={t("panel.settings.timezone", { defaultValue: "时区" })} help={t("panel.settings.timezoneHelp", { defaultValue: "周期与日历按此时区计算；默认自动跟随系统" })}>
           <Select value={form.timezone} options={timezoneOptions} onChange={(v: any) => updateForm({ timezone: String(v) })} />
         </Field>
-        <TmSwitch
-          checked={form.debug_mode}
-          label={t("panel.settings.debugMode", { defaultValue: "调试模式（供开发测试使用）" })}
-          onChange={(value: boolean) => updateForm({ debug_mode: value })}
-        />
         {onReopenGuide ? (
           <div className="tm-reopen-guide">
             <span className="tm-reopen-hint">{t("panel.manage.reopenHint", { defaultValue: "再次查看初始设置流程。现有设置会保留。" })}</span>
             <Button onClick={onReopenGuide}>{t("panel.manage.reopenGuide", { defaultValue: "重新打开引导" })}</Button>
           </div>
         ) : null}
-      </Card>
+        <details className="tm-settings-disclosure">
+          <summary>{t("panel.settings.advanced", { defaultValue: "高级设置" })}</summary>
+          <div className="tm-settings-disclosure-body">
+            <TmSwitch checked={form.debug_mode}
+              label={t("panel.settings.debugMode", { defaultValue: "调试模式（供开发测试使用）" })}
+              onChange={(value: boolean) => updateForm({ debug_mode: value })} />
+          </div>
+        </details>
+      </section>
+      </div>
 
-      {/* 面板外观由 panel.tsx 以 children 注入（保持背景图状态在顶层管理）；
-          卡内只留「还原」，落盘与通用设置共用下方那一条保存条 */}
-      {props.children}
-
-      <Card title={t("panel.settings.dangerZone", { defaultValue: "数据重置" })}>
-        {resetAll && onResetAll ? (
-          <Button tone="danger" onClick={onResetAll}>{t("actions.reset.label", { defaultValue: "重置状态与记录" })}</Button>
-        ) : null}
-      </Card>
-
+      <div id="tm-settings-data" role="tabpanel" aria-labelledby="tm-settings-tab-data"
+        hidden={section !== "data"} tabIndex={0}>
       {lanlanList.length > 0 ? (
-        <Card title={t("panel.lanlan.known", { defaultValue: "已有状态的角色" })}>
+        <section className="tm-settings-section">
+          <h3>{t("panel.lanlan.known", { defaultValue: "已有状态的角色" })}</h3>
           <div className="tm-lanlan-list">
             {lanlanList.map((item) => {
               const name = String(item.name || "")
@@ -107,8 +128,21 @@ export function ManagePane(props: {
               )
             })}
           </div>
-        </Card>
+        </section>
       ) : null}
+      {resetAll && onResetAll ? (
+        <section className="tm-settings-section tm-settings-danger">
+          <h3>{t("panel.settings.dangerZone", { defaultValue: "数据重置" })}</h3>
+          <div className="tm-settings-reset-row">
+            <span className="tm-derived">{t("panel.settings.resetCharacter", {
+              defaultValue: "当前角色：{name}", name: lanlan || "—",
+            })}</span>
+            <Button tone="danger" onClick={onResetAll}>{t("actions.reset.label", { defaultValue: "重置状态与记录" })}</Button>
+          </div>
+        </section>
+      ) : null}
+      </div>
+      </div>
       {props.footer}
     </div>
   )

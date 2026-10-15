@@ -57,7 +57,7 @@ export const PANEL_STYLES = `
   --tm-focus: var(--primary); --info: var(--secondary); --tm-info-text: var(--secondary);
 }
 
-.neko-card, .tm-card {
+.neko-card, .tm-card, .tm-settings-surface {
   border: 1px solid var(--tm-border); border-radius: 8px;
   background: rgba(var(--tm-surface-rgb), calc(var(--tm-surface-alpha) * var(--tm-card-k, 1)));
   -webkit-backdrop-filter: var(--tm-glass-filter, none);
@@ -717,7 +717,47 @@ export const PANEL_STYLES = `
   text-shadow: var(--tm-text-shadow, none);
 }
 
-/* 外观卡：图库/调节区共用网格 */
+/* Settings use flat sections; hidden views stay mounted during imports. */
+.tm-settings { gap: 0; }
+.tm-settings [hidden] { display: none !important; }
+.tm-settings-surface { display: grid; min-width: 0; overflow: hidden; }
+.tm-settings-nav {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--tm-border);
+}
+.tm-settings-tab, .tm-media-tab {
+  box-sizing: border-box; min-width: 0; min-height: 44px; padding: 10px 8px;
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  background: transparent; color: var(--muted); font: inherit; font-size: 13px; line-height: 1.5;
+  overflow-wrap: anywhere; cursor: pointer; letter-spacing: 0;
+}
+.tm-settings-tab[aria-selected="true"], .tm-media-tab[aria-selected="true"] {
+  border-bottom-color: var(--primary); color: var(--primary); font-weight: 600;
+}
+.tm-settings-tab:hover, .tm-media-tab:hover { background: var(--tm-accent-soft); }
+.tm-settings-section { display: grid; gap: 14px; min-width: 0; padding: 16px; }
+.tm-settings-section + .tm-settings-section { border-top: 1px solid var(--tm-border); }
+.tm-settings-section h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.tm-settings-disclosure { min-width: 0; border-top: 1px solid var(--tm-border); }
+.tm-settings-disclosure > summary {
+  box-sizing: border-box; min-height: 44px; padding: 10px 8px; border-radius: 4px;
+  font-size: 13px; font-weight: 600; line-height: 1.5; list-style-position: inside; cursor: pointer; overflow-wrap: anywhere;
+}
+.tm-settings-disclosure > summary:hover { background: var(--tm-accent-soft); }
+.tm-settings-disclosure > summary:focus-visible { outline: 2px solid var(--tm-focus); outline-offset: 2px; }
+.tm-settings-disclosure[open] > summary { color: var(--primary); }
+.tm-settings-disclosure-body { display: grid; gap: 12px; min-width: 0; padding: 8px 4px 12px; }
+.tm-settings-reset-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.tm-settings-danger h3 { color: var(--danger); }
+.tm-settings .tm-reopen-guide { margin-top: 0; }
+.tm-wallpaper-current { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; font-size: 12px; color: var(--muted); }
+.tm-wallpaper-current strong { min-width: 0; color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.tm-media-tabs { display: flex; gap: 12px; border-bottom: 1px solid var(--tm-border); }
+.tm-media-tab { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 80px; }
+.tm-media-count { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tm-gallery-empty { padding: 12px 0 4px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.tm-media-import-fields { display: grid; gap: 10px; min-width: 0; }
+
+/* Appearance gallery and adjustments share one column. */
 .tm-appearance { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; }
 .tm-appearance .neko-field { min-width: 0; }
 .tm-appearance .neko-segmented { display: flex; flex-wrap: wrap; }
@@ -819,7 +859,7 @@ export const PANEL_STYLES = `
 .tm-wallpaper-motion { width: 18px; height: 18px; flex: 0 0 18px; accent-color: var(--primary); }
 .tm-media-storage { display: grid; min-width: 0; gap: 8px; }
 .tm-media-policy { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
-.tm-media-policy label { display: grid; gap: 4px; min-width: 130px; color: var(--muted); font-size: 12px; }
+.tm-media-policy label { display: grid; flex: 1 1 130px; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .tm-media-policy input { width: 100%; box-sizing: border-box; min-height: 32px; border: 1px solid var(--tm-border); border-radius: 5px; padding: 5px 7px; color: var(--text); background: var(--surface); }
 .tm-media-policy input:focus-visible { outline: 2px solid var(--tm-focus); outline-offset: 1px; }
 

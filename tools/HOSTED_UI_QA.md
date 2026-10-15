@@ -1,5 +1,64 @@
 # Isolated Hosted UI QA
 
+## 1.4.0 Card Surface Release Acceptance
+
+The final settings surface reuses the plugin card border, radius, shadow and
+single wallpaper material. The shared save bar stays outside the surface.
+`../dist/qa-settings-card-border/report.json` passed 101 interactions and
+78 screenshots across eight locales, desktop/narrow and light/dark.
+`../dist/qa-settings-card-border-regression/report.json` passed 63 general,
+gallery, transparency and compact-footer checks. Both reports have zero check,
+render or layout failures. Hosted typecheck passed. These are isolated checks;
+Steam installation and testing remain manual.
+
+## 1.4.0 Settings Layout And Media Categories
+
+Settings now opens on Appearance, with separate General and Data views.
+Views stay mounted when hidden, retaining form drafts, active imports, directory
+candidates and unsaved storage inputs. Debug mode is under Advanced. Reset and
+orphan cleanup retain their confirmation flow and current-character protection.
+Flat sections share one outer surface using the same border, radius, shadow
+and wallpaper material as other plugin cards. The unified save bar remains
+outside that surface and still writes only dirty settings and appearance.
+
+The wallpaper library separates images and videos with counts. Missing legacy
+`kind` means image. Filtering does not change the selected background or save it.
+Successful imports reveal their category without selecting the new item.
+Revert reveals the saved item's category. Import methods, adjustments and
+storage are separate disclosures. Import errors, progress and cancellation stay
+outside the import disclosure.
+
+Final reports under `../dist`:
+
+- `qa-settings-layout-final/report.json`: 101 interactions and 78 screenshots,
+  covering all eight locales, 1280/390 widths, light/dark, and a 320px empty-video
+  case. Keyboard tabs, drafts, shared save from Data, cancelling reset, import
+  methods, cross-type revert, image import, visible errors after collapse and
+  deleting the last video all passed.
+- `qa-settings-layout-regression-final/report.json`: 63 general, gallery, compact
+  savebar and diary-footer interaction checks passed.
+- `qa-settings-layout-video-final/report.json`: 61 video interactions and 31
+  screenshots passed, including real moving pixels, a video over 48 MiB,
+  import/cancel/clear races, reopen, reduced motion and decoder failure.
+
+There were no final check, render or layout failures. Desktop and narrow
+screenshots were visually inspected. Old test selectors now navigate the
+sections/disclosures. Cancellation checks use the recorded cancellation time,
+so legitimate hedged reads begun before cancellation are not mistaken for new
+reads after cancellation. The production transport was not changed.
+
+The full Python suite passed 972 tests with 38 existing explicit skips.
+Hosted typecheck and the 32-module link check passed.
+The isolated official build passed strict validation, ZIP CRC, payload hash and
+comparison of all 77 packaged source files.
+
+Package: `../dist/forever_companion_1.4.0_settings_layout.neko-plugin`
+(682,026 bytes). Version stays 1.4.0 for this local import test.
+SHA-256:
+`d23faa3f14656a96e9ecf2989f3a478aa847905c69a1c7a345fd4fe7b910037f`.
+The host Git worktree remained clean; no live Steam installation was changed.
+Actual Steam import and appearance remain user acceptance tests.
+
 ## 1.4.0 Version And Import Package
 
 The 1.3.10 performance and recovery changes documented below are included in

@@ -11,7 +11,8 @@ import { installFixtureBridge, makeFixture } from "./hosted_ui_fixture.mjs"
 import { demoChecks } from "./hosted_ui_demo_checks.mjs"
 import { introChecks } from "./hosted_ui_intro_checks.mjs"
 import { appearanceChecks, expandAppearance } from "./hosted_ui_appearance_checks.mjs"
-import { videoChecks } from "./hosted_ui_video_checks.mjs"
+import { videoChecks, recordFixture } from "./hosted_ui_video_checks.mjs"
+import { settingsChecks, selectSettings, openImport } from "./hosted_ui_settings_checks.mjs"
 import { directChecks } from "./hosted_ui_direct_checks.mjs"
 import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
 import { diaryChecks } from "./hosted_ui_diary_checks.mjs"
@@ -311,6 +312,7 @@ async function interactionChecks(browser, origin, output) {
       }
     })
     await check("five-second-refresh-preserves-unsaved-timezone-and-scroll", async () => {
+      await selectSettings(frame, "general")
       const timezone = frame.locator("select").first()
       await timezone.selectOption("Asia/Tokyo")
       await frame.locator(".tm-content").evaluate(element => { element.scrollTop = 240 })
@@ -321,6 +323,7 @@ async function interactionChecks(browser, origin, output) {
       assert.equal(await frame.locator(".tm-content").evaluate(element => element.scrollTop), scrollBefore)
     })
     await check("wallpaper-draft-survives-refresh-and-reverts", async () => {
+      await selectSettings(frame, "appearance")
       await frame.locator(".tm-gallery-none").click()
       assert.equal(await frame.locator(".tm-bg").count(), 0)
       const refreshBefore = await page.evaluate(() => window.qaRefreshes)
@@ -339,6 +342,7 @@ async function interactionChecks(browser, origin, output) {
       assert.equal(await page.evaluate(() => window.qaFixture.context.state.settings.timezone), "Asia/Tokyo")
     })
     await check("persist-failure-produces-visible-error", async () => {
+      await selectSettings(frame, "general")
       await frame.locator("select").first().selectOption("Europe/London")
       await page.evaluate(() => { window.qaFailNext = "update_settings" })
       await frame.locator(".tm-save button").click()
@@ -346,6 +350,7 @@ async function interactionChecks(browser, origin, output) {
       assert.equal(await page.evaluate(() => window.qaFixture.context.state.settings.timezone), "Asia/Tokyo")
     })
     await check("dangerous-reset-can-be-cancelled", async () => {
+      await selectSettings(frame, "data")
       const before = await page.evaluate(() => window.qaMessages.filter(message => message.method === "call" && message.payload.actionId === "reset_all").length)
       const label = await page.evaluate(() => window.qaFixture.context.i18n.messages.en["actions.reset.label"])
       await frame.getByRole("button", { name: label, exact: true }).click()
@@ -427,6 +432,7 @@ async function galleryChecks(browser, origin, output) {
       assert.equal(await page.evaluate(() => window.qaMessages.filter(message => message.method === "call" && message.payload.actionId === "gallery_remove").length), 0)
     })
     await check("upload-adds-to-gallery-without-selecting", async () => {
+      await openImport(frame, "image")
       const before = await background()
       const data = await page.evaluate(() => window.qaFixture.image.split(",")[1])
       await frame.locator('input[type=file][accept="image/*"]').setInputFiles({ name: "qa-upload.png", mimeType: "image/png", buffer: Buffer.from(data, "base64") })
@@ -450,7 +456,7 @@ async function galleryChecks(browser, origin, output) {
       const variables = await frame.locator(".tm-appearance-root").evaluate(element => ({ glass: element.style.getPropertyValue("--tm-glass"), card: element.style.getPropertyValue("--tm-card-k") }))
       assert.equal(variables.glass, "0px")
       assert.equal(variables.card, "0")
-      const surfaces = await frame.locator(".neko-card,.tm-card,.tm-tabs,.tm-statusbar,.tm-save,.neko-input,.neko-select,.neko-textarea").evaluateAll(elements => elements.map(element => {
+      const surfaces = await frame.locator(".neko-card,.tm-card,.tm-settings-surface,.tm-settings-nav,.tm-settings-section,.tm-tabs,.tm-statusbar,.tm-save,.neko-input,.neko-select,.neko-textarea").evaluateAll(elements => elements.map(element => {
         const style = getComputedStyle(element)
         return { className: element.className, background: style.backgroundColor, filter: style.backdropFilter }
       }))
@@ -468,7 +474,9 @@ async function galleryChecks(browser, origin, output) {
       assert.equal(appearanceCalls[0].payload.args.card_alpha, 0)
     })
     await check("unified-save-submits-settings-and-appearance-once", async () => {
+      await selectSettings(frame, "general")
       await frame.locator("select").first().selectOption("Europe/Berlin")
+      await selectSettings(frame, "appearance")
       await frame.locator(".tm-gallery-pick").nth(3).click()
       const before = await page.evaluate(() => window.qaMessages.length)
       await frame.locator(".tm-save button").click()
@@ -946,6 +954,7 @@ async function compactAndFooterChecks(browser, origin, output) {
     const loaded = await loadPage(browser, origin, { locale, wallpaper: "none", tab: "settings" }, 390, 600, "light")
     try {
       await check(`compact-savebar-clickable-${locale}-390x600`, async () => {
+        await selectSettings(loaded.frame, "general")
         await loaded.frame.locator("select").first().selectOption("Asia/Tokyo")
         await loaded.frame.locator(".tm-content").evaluate(element => { element.scrollTop = element.scrollHeight })
         const geometry = await loaded.frame.locator(".tm-save button").evaluate(element => {
@@ -1354,6 +1363,7 @@ async function copyChecks(browser, sources, origin, output) {
       })
       await check(`copy-${locale}-destructive-confirmation-cancel`, async () => {
         await loaded.frame.locator(".tm-tab").nth(TABS.indexOf("settings")).click()
+        await selectSettings(loaded.frame, "data")
         const before = await calls(loaded.page, "reset_all")
         await loaded.frame.getByRole("button", { name: text["actions.reset.label"], exact: true }).click()
         await loaded.frame.waitForSelector(".neko-modal")
@@ -1449,7 +1459,12 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only") && !process.argv.includes("--settings-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (process.argv.includes("--settings") || process.argv.includes("--settings-only")) {
+        const settings = await settingsChecks(browser, sources, origin, output, { loadPage, inspectLayout, recordFixture })
+        report.screenshots.push(...settings.screenshots)
+        report.interactions.push(...settings.checks)
+      }
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
