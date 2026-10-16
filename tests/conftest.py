@@ -253,6 +253,9 @@ class FakeStore:
         # 与宿主 PluginStore.delete 对齐：返回 Ok(bool) 表示 key 是否原本存在
         return Ok(self.data.pop(key, None) is not None)
 
+    async def keys(self, prefix=""):
+        return Ok(sorted(key for key in self.data if key.startswith(prefix)))
+
 
 class FakeConfig:
     def __init__(self, section=None):

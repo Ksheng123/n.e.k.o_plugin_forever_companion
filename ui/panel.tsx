@@ -31,6 +31,7 @@ import { ChannelSettingsCard } from "./settings_tone"
 import { DiarySettingsCard } from "./settings_diary"
 import { SaveBar } from "./savebar"
 import { ManagePane } from "./manage"
+import { BackupPanel } from "./backup"
 import { FeaturesPane } from "./features"
 import { OnboardingWizard } from "./onboarding"
 import { DiaryPane } from "./diary"
@@ -82,6 +83,11 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 首次向导（1.2.6）：本会话关闭闸门——服务端 wizard_pending 要等下一次 5s
   // 轮询才翻转，关闭后到翻转前的窗口全靠这个本地闸不重现
   const [wizardClosed, setWizardClosed] = useState(false)
+  const [backupRevision, setBackupRevision] = useState(0)
+  const [recordsRevision, setRecordsRevision] = useState(0)
+  const resetLock = useRef(false)
+  const [resetting, setResetting] = useState(false)
+  const statsGeneration = useRef(0)
   const [form, setForm] = useState<FormValues>(settingsToForm({}))
   // 面板外观（1.2.0）：图库索引/外观参数（saved=生效、draft=实时预览）按需拉取；
   // 图片本体逐条缓存（imgCache），绝不进 5s 轮询载荷
@@ -172,6 +178,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   useEffect(() => {
     syncForm(settings)
   }, [
+    backupRevision,
     settings.auto_derive,
     settings.cycle_length,
     settings.period_length,
@@ -269,7 +276,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       pendingUploadedVideo.current = ""
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [backupRevision])
 
   // 图片本体按需拉取（带在途去重）：选中某张壁纸时若没缓存就拉
   function loadImage(id: string, forceBlob = false, initialMedia?: Record<string, any>) {
@@ -696,6 +703,33 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     setDraftAp(ap)
     setMediaStorage(readMediaStorage(result.media_storage))
     return ap
+  }
+
+  function invalidateRecords() {
+    statsGeneration.current += 1
+    setStatsLoading(false)
+    setHeatData(null)
+    setMonthData(null)
+    setMonthList([])
+    setRecordsRevision((value) => value + 1)
+  }
+
+  async function onBackupRestored() {
+    invalidateRecords()
+    mediaGeneration.current += 1
+    gallerySnapshotRevision.current += 1
+    themeCache.current = {}
+    thumbTried.current = {}
+    previousReadyBg.current = null
+    setImgCache({})
+    setReadyBg({ id: "", dataUrl: "", theme: null })
+    setBackgroundError("")
+    setBackgroundProgress(null)
+    setMediaReset((value) => value + 1)
+    setBackupRevision((value) => value + 1)
+    toast.success(t("panel.backup.restored"))
+    try { await props.api.refresh() }
+    catch (err) { toast.error(errorText(err, t)) }
   }
 
   async function clearMedia(): Promise<boolean> {
@@ -1132,28 +1166,39 @@ export default function Panel(props: PluginSurfaceProps<State>) {
 
   // 确认文案与后端 action 共用翻译，错误码经 errorText 展示。
   async function onResetAll() {
-    const ok = await confirmDialog({
-      title: t("actions.reset.label", { defaultValue: "重置状态与记录" }),
-      message: t("actions.reset.confirm", { defaultValue: "确定重置当前角色的状态与记录吗？快进天数、情绪状态、时光日记，以及未归档的我的日记和累计素材都会清空，且无法恢复。模拟开关恢复默认设置；个人日记、归档和其他角色不受影响。" }),
-      tone: "danger",
-      ...confirmLabels,
-    })
-    if (!ok) return
+    if (resetLock.current) return
+    resetLock.current = true
+    const expectedLanlan = state.lanlan || ""
     try {
-      await props.api.call("reset_all", {})
+      const ok = await confirmDialog({
+        title: t("actions.reset.label", { defaultValue: "重置状态与记录" }),
+        message: t("actions.reset.confirm", { defaultValue: "确定清空当前角色的状态与记录吗？快进天数、情绪状态、三本日记（时光日记、个人日记、我的日记）、全部归档、累计素材和相处统计都会清空，待写任务会取消，且无法恢复。模拟开关恢复默认设置；周期起点、参数、全局设置、壁纸和其他角色的数据保留。" }),
+        tone: "danger",
+        ...confirmLabels,
+      })
+      if (!ok) return
+      setResetting(true)
+      unwrapCallResult(await props.api.call("reset_all", { expected_lanlan: expectedLanlan }))
+      invalidateRecords()
       await props.api.refresh()
+      toast.success(t("panel.settings.resetDone"))
     } catch (err) {
       toast.error(errorText(err, t))
+    } finally {
+      setResetting(false)
+      resetLock.current = false
     }
   }
 
   async function onLoadStats(month?: string, year?: string) {
+    const generation = ++statsGeneration.current
     setStatsLoading(true)
     try {
       const args: Record<string, string> = {}
       if (month) args.month = month
       if (year) args.year = year
       const payload = unwrapCallResult(await props.api.call("get_stats", args))
+      if (!panelAlive.current || generation !== statsGeneration.current) return
       const r = (payload || {}) as Record<string, any>
       setHeatData((r.heatmap || {}) as Heatmap)
       setMonthData((r.month || null) as MonthReport | null)
@@ -1161,12 +1206,14 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     } catch (err) {
       console.warn("[forever_companion] load stats failed:", err)
     } finally {
-      setStatsLoading(false)
+      if (generation === statsGeneration.current) setStatsLoading(false)
     }
   }
 
   // 切角色时旧统计立即失效：清到空态，避免上一个角色的热力图残留展示
   useEffect(() => {
+    statsGeneration.current += 1
+    setStatsLoading(false)
     setHeatData(null)
     setMonthData(null)
     setMonthList([])
@@ -1336,6 +1383,15 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const surfaceAppearance = bgDataUrl ? draftAp : { ...draftAp, glass: 0, card_alpha: 100 }
   const rootStyle = Object.assign({ display: "contents" }, appearanceVars(surfaceAppearance), themeColorVars(themeColors)) as Record<string, string>
 
+  if (state.backup_recovery_required) return (
+    <Page>
+      <div className="tm-settings">
+        <style>{PANEL_STYLES}</style>
+        <BackupPanel t={t} api={props.api} available={true} disabled={false} recoveryRequired={true} onRestored={onBackupRestored} />
+      </div>
+    </Page>
+  )
+
   return (
     <Page className={bgDataUrl ? "tm-has-bg" : ""}>
       <div key="root" className="tm-appearance-root" style={rootStyle}>
@@ -1446,7 +1502,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
                 t={t} form={form} updateForm={updateForm}
                 mood={mood} enabled={status.enabled !== false}
                 canEnd={!!liftMoodAction} ending={moodEnding}
-                onEnd={onEndMood} onDiary={() => setTab("diary")}
+                onEnd={onEndMood}
               />
               <EmotionSenseSettingsCard t={t} form={form} updateForm={updateForm} />
               <ChannelSettingsCard
@@ -1462,6 +1518,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           ) : null}
           {activeTab === "diary" ? (
             <DiaryPane
+              key={`${state.lanlan || ""}:${recordsRevision}`}
               t={t}
               diary={state.diary_recent || []}
               diaryTotal={state.diary_total || 0}
@@ -1530,11 +1587,16 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               updateForm={updateForm}
               resetAll={resetAll}
               onResetAll={onResetAll}
+              resetting={resetting}
               lanlanList={lanlanKnown}
               lanlan={state.lanlan}
               canPrune={!!pruneLanlan}
               onPruneLanlan={onPruneLanlan}
               onReopenGuide={reopenGuide}
+              api={props.api}
+              canBackup={actions.some((action) => action.id === "data_backup")}
+              backupDisabled={savingAll || apBusy || journalSubmitting || reviewSubmitting || resetting}
+              onRestored={onBackupRestored}
               footer={<SaveBar t={t} canSave={!!updateSettingsAction} saving={savingAll} onSave={saveSettingsPage} />}
             >
               <AppearanceCard

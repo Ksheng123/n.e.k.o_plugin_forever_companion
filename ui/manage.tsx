@@ -1,7 +1,8 @@
 // Keep settings sections mounted so switching views preserves drafts and imports.
 import { Field, Select, StatusBadge, Button, useState } from "@neko/plugin-ui"
 import { TmSwitch } from "./tmswitch"
-import type { HostedAction } from "@neko/plugin-ui"
+import type { HostedAction, HostedApi } from "@neko/plugin-ui"
+import { BackupPanel } from "./backup"
 import type { FormValues, LanlanItem, TFunc } from "./types"
 import { lanlanPhaseLabel, moodBadgeTone, navigateTabs } from "./utils"
 
@@ -13,12 +14,17 @@ export function ManagePane(props: {
   // 受控重置入口（i18n 契约第九轮）：错误经 panel.tsx 的 errorText 翻译，
   // 不再走 ActionButton 的内联裸码展示
   onResetAll?: () => void
+  resetting?: boolean
   lanlanList: LanlanItem[]
   lanlan?: string
   canPrune: boolean
   onPruneLanlan: (name: string) => void
   // 再看一次新手引导（1.2.6）：只清引导记录，不动任何配置
   onReopenGuide?: () => void
+  api: HostedApi
+  canBackup: boolean
+  backupDisabled: boolean
+  onRestored: () => Promise<void>
   children?: any
   // 页面底部的吸底保存条由 panel.tsx 注入（放在最后一张卡之后，与其它设置页同位；
   // 危险区与角色名单是"点了即生效"的区，不该被保存条压在下面）
@@ -92,6 +98,7 @@ export function ManagePane(props: {
 
       <div id="tm-settings-data" role="tabpanel" aria-labelledby="tm-settings-tab-data"
         hidden={section !== "data"} tabIndex={0}>
+      <BackupPanel t={t} api={props.api} available={props.canBackup} disabled={props.backupDisabled} onRestored={props.onRestored} />
       {lanlanList.length > 0 ? (
         <section className="tm-settings-section">
           <h3>{t("panel.lanlan.known", { defaultValue: "已有状态的角色" })}</h3>
@@ -137,7 +144,7 @@ export function ManagePane(props: {
             <span className="tm-derived">{t("panel.settings.resetCharacter", {
               defaultValue: "当前角色：{name}", name: lanlan || "—",
             })}</span>
-            <Button tone="danger" onClick={onResetAll}>{t("actions.reset.label", { defaultValue: "重置状态与记录" })}</Button>
+            <Button tone="danger" disabled={props.resetting} onClick={onResetAll}>{t("actions.reset.label", { defaultValue: "重置状态与记录" })}</Button>
           </div>
         </section>
       ) : null}

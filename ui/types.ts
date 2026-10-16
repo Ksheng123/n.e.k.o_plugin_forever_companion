@@ -312,6 +312,7 @@ export type StatsState = {
 }
 
 export type State = {
+  backup_recovery_required?: boolean
   status?: Status
   anchor_date?: string
   advance_days?: number

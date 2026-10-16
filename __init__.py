@@ -539,6 +539,7 @@ from .core.stats import record_turn as stats_record_turn
 from .core.stats import (
     summary_payload as summary_payload,
 )
+from .mixins.backup import BackupMixin
 from .mixins.capabilities import CapabilityMixin
 from .mixins.debug_entries import DebugEntriesMixin
 from .mixins.host_coord import HostCoordMixin
@@ -547,6 +548,7 @@ from .mixins.panel import PanelEntriesMixin
 from .mixins.senses import SensesMixin
 from .mixins.shards import ShardsMixin
 from .mixins.whisper import WhisperMixin
+from .services.data_guard import guard_data_operations
 from .services.emotion_sense import EmotionSenseService
 from .services.tone_slot import (
     _channel_mode as _channel_mode,
@@ -584,7 +586,9 @@ LANLAN_NAME_TOKEN = "{LANLAN_NAME}"
 
 
 @neko_plugin
+@guard_data_operations
 class ForeverCompanionPlugin(
+    BackupMixin,
     CapabilityMixin,
     ShardsMixin,
     WhisperMixin,
@@ -597,6 +601,7 @@ class ForeverCompanionPlugin(
 ):
     def __init__(self, ctx: Any) -> None:
         super().__init__(ctx)
+        self._init_data_backup()
         self._tide_cfg: JsonObject = {}
         self._phases_cfg: JsonObject = {}
         self._forbidden_words: list[str] = []

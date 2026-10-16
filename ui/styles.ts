@@ -1,5 +1,15 @@
 // Panel materials share neutral surfaces; wallpaper transparency is controlled by appearance variables.
 export const PANEL_STYLES = `
+.tm-backup { min-width: 0; }
+.tm-backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.tm-backup-actions .neko-button, .tm-backup .neko-download { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.tm-backup-preview { border-top: 1px solid var(--tm-divider); margin-top: 16px; padding-top: 12px; }
+.tm-backup-preview h4 { font-size: 14px; margin: 0 0 10px; }
+.tm-backup-preview p { margin: 10px 0; }
+.tm-backup-roles { max-height: 100px; overflow: auto; overflow-wrap: anywhere; }
+.tm-backup-path { overflow-wrap: anywhere; user-select: text; font-size: 12px; margin: 8px 0; }
+.tm-backup-result { margin-top: 14px; }
+.tm-backup-error { color: var(--danger); overflow-wrap: anywhere; }
 .tm-mood-current { display: grid; gap: 5px; min-width: 0; }
 .tm-mood-choice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; overflow-wrap: anywhere; }
 .tm-mood-choice strong { font-size: 15px; font-weight: 600; }

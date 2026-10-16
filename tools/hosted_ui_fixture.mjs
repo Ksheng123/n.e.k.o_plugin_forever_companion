@@ -9,7 +9,7 @@ const ACTIONS = [
   "get_stats", "clear_stats", "get_panel_gallery", "get_gallery_image",
   "set_panel_appearance", "gallery_add", "gallery_remove", "gallery_set_thumb",
   "set_capability", "set_capability_flags", "get_capability_intro",
-  "set_onboarding", "prune_lanlan", "lift_mood",
+  "set_onboarding", "prune_lanlan", "lift_mood", "data_backup",
 ]
 
 function crc32(bytes) {
@@ -271,6 +271,9 @@ export function installFixtureBridge(fixture) {
   window.qaRefreshes = 0
   window.qaFailNext = ""
   window.qaResults = {}
+  window.qaBackupCalls = []
+  window.qaBackupFailure = ""
+  window.qaOpenedPaths = []
   window.qaDelays = { get_panel_gallery: Number(fixture.rpcDelay), get_gallery_image: Number(fixture.rpcDelay) }
   window.qaLegacyGallery = fixture.legacyGallery === "true"
   window.qaResolved = []
@@ -388,6 +391,61 @@ export function installFixtureBridge(fixture) {
       throw new Error("persist_failed")
     }
     if (Object.hasOwn(window.qaResults, action)) return clone(window.qaResults[action])
+    if (action === "reset_all") {
+      if (args.expected_lanlan && args.expected_lanlan !== state.lanlan) throw new Error("mood_changed")
+      state.advance_days = 0
+      state.status.enabled = false
+      state.mood = { active: false, history: [], valence: 0, arousal: 0 }
+      fixture.diary = []
+      fixture.journal = []
+      fixture.journalArchive = []
+      fixture.review = []
+      fixture.reviewArchive = []
+      fixture.reviewProgress = { turns: 0 }
+      fixture.stats = { heatmap: { days: [], year: 2026 }, month: null, month_available: [] }
+      fixture.heatmaps = {}
+      Object.assign(state, {
+        diary_recent: [], diary_total: 0, fragment_total: 0, journal_index: [],
+        journal_archive_brief: { pages: 0 }, review_archive_brief: { entries: 0 },
+        journal_write: { writing: false, last_result: null }, journal_invite_pending: false,
+        review_brief: { entries: 0, writing: false, last_result: null, progress_turns: 0 },
+        stats_summary: { summary: {}, badges: [] },
+      })
+      return { reset: true, lanlan: state.lanlan }
+    }
+    if (action === "data_backup") {
+      window.qaBackupCalls.push(clone(args))
+      if (window.qaBackupFailure) throw new Error(window.qaBackupFailure)
+      const summary = { roles: ["Alice", "Old @ role"], diary: 93, journal: 58, review: 41, images: 1 }
+      const manifest = { created_at: "2026-10-16T10:00:00+00:00", plugin_version: "1.4.0", summary }
+      const saved = { path: "D:\\Plugin Data\\forever_companion\\backups\\forever-companion-backup-20261016.fc-backup", directory: "D:\\Plugin Data\\forever_companion\\backups" }
+      if (args.op === "export") return saved
+      if (args.op === "begin") {
+        fixture.backupUpload = { id: "a".repeat(32), size: args.size, received: 0 }
+        return { upload_id: fixture.backupUpload.id, chunk_bytes: 393216 }
+      }
+      if (args.op === "recover") {
+        if (fixture.backupHealthyState) fixture.context.state = fixture.backupHealthyState
+        else delete state.backup_recovery_required
+        return { recovered: true }
+      }
+      if (!fixture.backupUpload || fixture.backupUpload.id !== args.upload_id) throw new Error("backup_upload_invalid")
+      if (args.op === "abort") { fixture.backupUpload = null; return { aborted: true } }
+      if (args.op === "chunk") {
+        if (args.offset !== fixture.backupUpload.received) throw new Error("backup_upload_invalid")
+        fixture.backupUpload.received += atob(args.data_b64).length
+        return { received: fixture.backupUpload.received }
+      }
+      if (args.op === "preview") return { manifest, current: { ...summary, roles: ["Alice"] }, token: "test-digest" }
+      if (args.op === "apply") {
+        if (args.confirm !== true || args.token !== "test-digest") throw new Error("backup_confirmation_required")
+        state.settings.timezone = "Europe/London"
+        fixture.appearance.bg_id = ""
+        fixture.backupUpload = null
+        return { restored: true, previous: saved, summary }
+      }
+      throw new Error("backup_invalid")
+    }
     if (action === "lift_mood") {
       if (window.qaChangeMoodBeforeLift) {
         window.qaChangeMoodBeforeLift = false
@@ -439,7 +497,7 @@ export function installFixtureBridge(fixture) {
     if (action === "get_journal") return { pages: args.scope === "archive" ? fixture.journalArchive : fixture.journal }
     if (action === "get_review") return { entries: args.scope === "archive" ? fixture.reviewArchive : fixture.review, progress: fixture.reviewProgress }
     if (action === "get_diary") return { items: fixture.diary.slice(Number(args.offset || 0)), has_more: false }
-    if (action === "get_stats") return { ...fixture.stats, heatmap: fixture.heatmaps?.[args.year] || fixture.stats.heatmap, month: { ...fixture.stats.month, month: args.month || fixture.stats.month.month } }
+    if (action === "get_stats") return { ...fixture.stats, heatmap: fixture.heatmaps?.[args.year] || fixture.stats.heatmap, month: fixture.stats.month ? { ...fixture.stats.month, month: args.month || fixture.stats.month.month } : null }
     if (action === "get_capability_intro") return clone(fixture.intros[args.capability_id] || { found: false, id: args.capability_id })
     if (action === "update_settings") {
       Object.assign(state.settings, args)
@@ -507,6 +565,7 @@ export function installFixtureBridge(fixture) {
     const message = event.data
     const frame = document.getElementById("hosted")
     if (event.source !== frame?.contentWindow || !message || typeof message !== "object") return
+    if (message.type === "neko-hosted-surface-open-path") { window.qaOpenedPaths.push(message.payload.path); return }
     if (message.type === "neko-hosted-surface-error" || message.type === "neko-hosted-surface-console") window.qaDiagnostics.push(message)
     if (message.type === "neko-hosted-surface-cancel") {
       window.qaCancelledRequests.push({ requestId: message.requestId, at: performance.now() })

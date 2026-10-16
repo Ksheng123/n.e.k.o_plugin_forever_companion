@@ -134,7 +134,7 @@ def test_copy_update_does_not_reopen_completed_onboarding() -> None:
         ("actions.prune_lanlan.confirm", ("角色", "残留数据", "周期", "情绪", "日记", "旧版周记")),
         (
             "actions.reset.confirm",
-            ("当前角色", "快进天数", "情绪状态", "时光日记", "未归档", "我的日记", "素材"),
+            ("当前角色", "快进天数", "情绪状态", "时光日记", "个人日记", "我的日记", "归档", "素材", "相处统计", "待写"),
         ),
     ),
 )
@@ -149,10 +149,10 @@ def test_reset_confirmation_distinguishes_preserved_records() -> None:
     assert "模拟开关" in text and "默认设置" in text
     statements = re.split(r"[。；]", text)
     assert any(
-        all(part in statement for part in ("个人日记", "归档", "其他角色"))
-        and ("不受影响" in statement or "保留" in statement)
+        all(part in statement for part in ("周期起点", "参数", "全局设置", "壁纸", "其他角色"))
+        and "保留" in statement
         for statement in statements
-    ), "Reset must distinguish preserved diaries, archives and other characters"
+    ), "Reset must distinguish preserved settings, wallpapers and other characters"
 
 
 def test_clear_statistics_keeps_diaries_separate() -> None:

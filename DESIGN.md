@@ -653,6 +653,32 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   验收使用隔离 Store 与真实 opaque-origin iframe，
   不启动宿主、不导入 Steam、不读取真实用户日记或聊天数据。
 
+## 数据备份与恢复（2026-10-16）
+
+- `core/backup.py` 定义版本 1 的 `.fc-backup` ZIP：仅 `manifest.json` 与
+  `data.json`，包含 SHA256、版本及计数；限制压缩格式、成员数、文件大小，
+  拒绝重复 JSON 键、非有限数和不合法的业务结构，不解压到用户路径。
+- `BackupMixin.data_backup` 是 `agent_hidden` 的面板动作，提供
+  `export/begin/chunk/preview/apply/abort/recover`；上传分块 384 KiB，
+  总量上限 256 MiB，单个暂存会话可替换，过期 30 分钟后清理。
+  apply 要求与已预览文件 SHA256 对应的 token 和字面量 confirm=true。
+- 遍历 SDK 公开 `store.keys()` 后按插件业务键白名单读取，保留原始角色名及
+  调试前备份，不读取视频 blob、宿主凭据或整个数据库。GIF/SVG 和检测到的
+  PNG/WebP 动画不进入可移植范围。配置仅携带用户覆盖及相对出厂值的差异。
+- 全量替换业务键与静态图片，保留目的机视频、动画及其注册簿/原件，
+  冲突 ID 重映射并更新背景引用；合计图库超过 24 项提前拒绝。
+  保留目的机 proactive_state，由既有监督循环协调，不恢复来源机水位。
+- `DataGate` 通过线程锁计数整个入口、timer、工具及动态调试调用，
+  在同一个插件实例跨临时事件循环/线程互斥；嵌套调用通过 ContextVar 识别。
+  不承诺跨进程事务。恢复前写独立备份和持久回滚日志，再写业务键、
+  重建分片/配置/缓存并同步工具状态。重载时 Store 的 Err 不可静默忽略；
+  日志只在写入和重载都成功后删除。失败保留保护状态，阻止日常调用。
+- startup 先恢复未完成事务；受保护时 dashboard 只返回无 IO 的恢复标志，
+  面板显示专用重试视图。成功恢复后刷新配置、图库、背景及统计，丢弃旧草稿。
+- 文件经安全二进制句柄写入 SDK data_path 的 `backups/`，不注册到静态目录；
+  使用现有 FileDownload 的路径桥打开目录，适配无 allow-downloads 的 iframe。
+  导出包与暂存不进入发行 `.neko-plugin`，宿主仅作只读契约与打包工具来源。
+
 ## Read Context Plan
 - 参考 `game_agent_minecraft`（push_message read 注入）、`memo_reminder`（store+timer）、
   `sts2_autoplay`（llm_tool+tr+ui.action）三个官方插件

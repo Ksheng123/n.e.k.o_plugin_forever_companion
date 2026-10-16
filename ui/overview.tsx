@@ -152,7 +152,6 @@ function MoodSummaryCard(props: { t: TFunc; mood: Mood }) {
   const vScore = valenceScore(v)
   return (
     <Card title={t("panel.mood.gauge.title", { defaultValue: "当前心情" })}>
-      <div className="tm-derived">{t("panel.mood.observationHint", { defaultValue: "插件估计，不代表角色全部感受" })}</div>
       <div className="tm-ov-mood">
         <span className="tm-ov-mood-word" style={{ color: wordColor }}>{word}</span>
         <div className="tm-ov-mood-bars">

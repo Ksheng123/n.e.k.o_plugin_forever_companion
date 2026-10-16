@@ -13,6 +13,7 @@ import { diaryWriteError, fragmentKindKey, journalTrendKey, toneLabelKey } from 
 type CatalogView = { query: string; page: number }
 
 export function DiaryPane(props: {
+  key?: string
   t: TFunc
   diary: DiaryItem[]
   diaryTotal: number

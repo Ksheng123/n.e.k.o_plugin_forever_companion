@@ -88,7 +88,6 @@ from ..core.state import (
     _LanlanShard,
     _legacy_debug_backup_key,
     _mood_key,
-    _MoodState,
     _now_utc,
     _parse_iso_ts,
     _review_archive_key,
@@ -1047,7 +1046,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @ui.action(
         label=tr("actions.reset.label", default="重置状态与记录"),
         tone="danger",
-        confirm=tr("actions.reset.confirm", default="确定重置当前角色的状态与记录吗？快进天数、情绪状态、时光日记，以及未归档的我的日记和累计素材都会清空，且无法恢复。模拟开关恢复默认设置；个人日记、归档和其他角色不受影响。"),
+        confirm=tr("actions.reset.confirm", default="确定清空当前角色的状态与记录吗？快进天数、情绪状态、三本日记（时光日记、个人日记、我的日记）、全部归档、累计素材和相处统计都会清空，待写任务会取消，且无法恢复。模拟开关恢复默认设置；周期起点、参数、全局设置、壁纸和其他角色的数据保留。"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1055,32 +1054,63 @@ class PanelEntriesMixin(MediaGalleryMixin):
         name=tr("entries.reset_all.name", default="重置全部数据"),
         description=tr(
             "entries.reset_all.description",
-            default="清空当前角色的快进天数、情绪状态与心情手记（不改配置锚点，不影响其他角色）。",
+            default="清空当前角色的快进天数、情绪状态、三本日记、归档、素材和相处统计，取消待写任务；保留周期设置、壁纸和其他角色。",
         ),
-        input_schema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {"expected_lanlan": {"type": "string"}}},
         metadata={"agent_hidden": True},
     )
-    async def reset_all(self, **_: Any):
-        # 只清当前角色的 shard：其他角色的周期/情绪/手记不受影响
-        lanlan, shard = await self._current_shard_async()
+    async def reset_all(self, expected_lanlan: str = "", **_: Any):
+        # Resolve afresh so a confirmation cannot accidentally clear another role.
+        self._current_lanlan_cache = ("", -1000.0)
+        lanlan = await self._resolve_current_lanlan()
+        if expected_lanlan and expected_lanlan != lanlan:
+            return Err(SdkError("mood_changed"))
+        previous = await self._ensure_shard(lanlan)
+        if not self._store_ready or not self._state_trusted:
+            return Err(SdkError("persist_failed"))
+        shard = _LanlanShard()
+        shard.lanlan = lanlan
+        shard.loaded = True
+        shard.cycle = dict(previous.cycle)
         shard.cycle["advance_days"] = 0
         shard.cycle.pop("enabled", None)
-        shard.mood = _MoodState()
-        shard.diary = []
-        # 我的日记一并重置（重置语义是"当前角色清零重来"，评价与素材同属）
-        shard.review = []
+        shard.cycle.pop("last_journal_invite_ts", None)
         shard.review_stats = review_new_stats()
+        # An explicit empty stats record prevents history backfill after restart.
+        shard.stats = {"backfilled": True}
+        self._shards[lanlan] = shard
+        self._calendar_cache = ((), None)
         res_cycle = await self._save_shard_cycle(lanlan, shard)
         res_mood = await self._save_shard_mood(lanlan, shard)
         res_diary = await self._save_shard_diary(lanlan, shard)
+        res_journal = await self._save_shard_journal(lanlan, shard)
         res_review = await self._save_shard_review(lanlan, shard)
+        res_stats = await self._save_shard_stats(lanlan, shard)
+        results = [res_cycle, res_mood, res_diary, res_journal, res_review, res_stats]
+        for key in (_journal_archive_key(lanlan), _review_archive_key(lanlan), _weekly_key(lanlan)):
+            results.append(await self._store_write(key, [], f"reset {key}"))
+        results.append(await self._store_write(
+            _review_stats_key(lanlan), {}, f"reset legacy review stats for {lanlan}",
+        ))
+        for kind, data_key in (
+            ("journal", _journal_key(lanlan)), ("review", _review_key(lanlan)), ("stats", _stats_key(lanlan)),
+        ):
+            results.append(await self._store_delete(
+                _debug_backup_key(kind, lanlan), f"reset {kind} debug backup for {lanlan}",
+            ))
+            # A suffix can also belong to a real role; never delete its records.
+            if f"{lanlan}|pre-debug" not in self._lanlan_index:
+                results.append(await self._store_delete(
+                    _legacy_debug_backup_key(data_key), f"reset legacy {kind} debug backup for {lanlan}",
+                ))
         # 重置清空了情绪动作：同步解除暂停，水位写结果一并聚合（1.2.2 审查轮 P2）
         res_pause = await self._maybe_sync_proactive_pause()
         # 多键写入：任一 Err 即向用户报错（前面的写不回滚，保持简单；
         # 真失败极罕见，重试幂等）
-        persist_err = self._persist_error(res_cycle, res_mood, res_diary, res_review, res_pause)
+        persist_err = self._persist_error(*results, res_pause)
         if persist_err is not None:
             return persist_err
+        self.logger.info("character records reset: lanlan={} diaries=all archives=all stats=cleared", lanlan)
         return Ok({
             **build_status_payload(self._current_phase_state(shard), enabled=self._enabled(shard)),
             "lanlan": lanlan,

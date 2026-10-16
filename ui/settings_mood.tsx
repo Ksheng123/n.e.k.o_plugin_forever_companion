@@ -14,7 +14,6 @@ export function MoodSettingsCard(props: {
   canEnd: boolean
   ending: boolean
   onEnd: () => void
-  onDiary: () => void
 }) {
   const { t, form, updateForm } = props
 
@@ -42,9 +41,9 @@ export function MoodSettingsCard(props: {
 
 function MoodExperience(props: {
   t: TFunc; mood: Mood; enabled: boolean; canEnd: boolean; ending: boolean
-  onEnd: () => void; onDiary: () => void
+  onEnd: () => void
 }) {
-  const { t, mood, enabled, canEnd, ending, onEnd, onDiary } = props
+  const { t, mood, enabled, canEnd, ending, onEnd } = props
   const systemOn = enabled && mood.system_enabled !== false
   const active = systemOn && !!mood.active
   const events = Array.isArray(mood.history) ? mood.history : []
@@ -78,7 +77,6 @@ function MoodExperience(props: {
             <span>{t("panel.mood.observation", { defaultValue: "心情观察" })}</span>
             <span style={{ color: moodDotColor(systemOn ? v : 0) }}>{word}</span>
           </div>
-          <div className="tm-derived">{t("panel.mood.observationHint", { defaultValue: "插件估计，不代表角色全部感受" })}</div>
           <div className="tm-mood-observation-bars">
             <ObservationBar label={t("panel.mood.gauge.valence", { defaultValue: "愉悦度" })}
               score={systemOn ? valenceScore(v) : null} color={valenceBarColor(v)} />
@@ -86,12 +84,11 @@ function MoodExperience(props: {
               score={systemOn ? arousalScore(a) : null} color={arousalColor(a)} />
           </div>
         </div>
-        <div className="tm-mood-actions">
-          <Button onClick={onDiary}>{t("panel.mood.diaryLink", { defaultValue: "查看时光日记" })}</Button>
-          {active && canEnd ? (
+        {active && canEnd ? (
+          <div className="tm-mood-actions">
             <Button disabled={ending} onClick={onEnd}>{t("actions.liftMood.label", { defaultValue: "结束当前状态" })}</Button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </Card>
       <Card title={t("panel.mood.historyTitle", { defaultValue: "最近变化" })}>
         {events.length ? (

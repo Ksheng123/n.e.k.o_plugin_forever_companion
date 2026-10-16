@@ -122,8 +122,7 @@ export async function moodChecks(browser, sources, origin, output, { loadPage, i
           assert.equal(await frame.locator(".tm-mood-event").count(), 12)
           assert.equal(await frame.locator(".tm-mood-observation-value").first().innerText(), "\u2014")
         } else assert(body.includes(text["panel.mood.historyEmpty"]))
-        await frame.getByRole("button", { name: text["panel.mood.diaryLink"], exact: true }).click()
-        await frame.getByRole("button", { name: text["panel.journal.tabJournal"], exact: true }).waitFor()
+        assert.equal(await frame.getByRole("button", { name: text["panel.mood.diaryLink"], exact: true }).count(), 0)
         assert.equal(await page.evaluate(() => window.qaMessages.filter(msg => msg.method === "call" && msg.payload.actionId === "lift_mood").length), 0)
       })
     } finally { await context.close() }

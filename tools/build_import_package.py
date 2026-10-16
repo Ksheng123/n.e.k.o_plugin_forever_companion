@@ -58,7 +58,7 @@ def build_and_verify(plugin: Path, output: Path, *, check_only: bool = False) ->
         forbidden = {
             ".git", ".venv", ".pytest_cache", ".ruff_cache", "__pycache__",
             "tests", "tools", "store.db", ".env", "data", "wallpapers",
-            "temp", "staging", "backup", "published", "wallpaper_playback",
+            "temp", "staging", "backup", "backups", "published", "wallpaper_playback",
         }
         source_files = 0
         for name in entries:
