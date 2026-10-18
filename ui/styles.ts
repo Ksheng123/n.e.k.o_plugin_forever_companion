@@ -1500,6 +1500,11 @@ export const PANEL_STYLES = `
   margin: 0; min-width: 0; font-size: 13px; line-height: 1.65;
   color: var(--text); overflow-wrap: anywhere;
 }
+.tm-ci-actions { padding-top: 16px; border-top: 1px solid var(--tm-divider); }
+.tm-ci-actions .tm-ci-fact { padding: 10px 0; border-bottom: 1px solid var(--tm-divider); }
+.tm-ci-actions .tm-ci-fact:first-child { padding-top: 0; }
+.tm-ci-actions .tm-ci-fact:last-child { padding-bottom: 0; border-bottom: 0; }
+.tm-ci-actions dt { font-weight: 600; color: var(--text); }
 .tm-ci-deps { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; padding: 0; margin: 0; }
 .tm-ci-deps li { min-width: 0; color: var(--tm-info-text); overflow-wrap: anywhere; }
 .tm-ci-model { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px; }

@@ -42,6 +42,7 @@ from ..core.cycle import (
     compute_phase_state,
     parse_anchor_date,
 )
+from ..core.fragments import diary_display_record
 from ..core.journal import archive_brief, page_header
 from ..core.media import GalleryMediaError
 from ..core.onboarding import build_readiness, make_guide_record, wizard_pending
@@ -241,6 +242,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
         # 时光日记时间线（混排她的手记与自动碎片，按时间倒序）：碎片仅截 12 条防膨胀；
         # source 缺省按 self 处理（0.6.x 旧数据零迁移）
         def _diary_view(item: JsonObject) -> JsonObject:
+            item = diary_display_record(item)
             return {
                 "ts": item.get("ts"),
                 "source": str(item.get("source") or "self"),
@@ -1092,6 +1094,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
         results.append(await self._store_write(
             _review_stats_key(lanlan), {}, f"reset legacy review stats for {lanlan}",
         ))
+        results.append(await self._store_delete(
+            _debug_backup_key("diary", lanlan), f"reset diary debug backup for {lanlan}",
+        ))
         for kind, data_key in (
             ("journal", _journal_key(lanlan)), ("review", _review_key(lanlan)), ("stats", _stats_key(lanlan)),
         ):
@@ -1672,7 +1677,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
         limit = max(1, min(int(limit), 50))
         offset = max(0, min(int(offset), len(shard.diary)))
         # 时间倒序分页：offset 跳过已看的，供面板"加载更多"追加
-        window = list(reversed(shard.diary))[offset : offset + limit]
+        window = [diary_display_record(item) for item in list(reversed(shard.diary))[offset : offset + limit]]
         return Ok({
             "items": window,
             "total": len(shard.diary),
@@ -2142,6 +2147,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
             _caps_key(name),  # 能力否决集（1.2.7）：角色份一并清，不留残留开关
             # 调试注入备份（1.3.0 第六轮）：过去 prune 根本不扫这些键，删掉角色后
             # pre_debug@*/与旧 |pre-debug 备份永久孤儿（且同名重建会被旧注入档污染）
+            _debug_backup_key("diary", name),
             _debug_backup_key("journal", name), _legacy_debug_backup_key(_journal_key(name)),
             _debug_backup_key("review", name), _legacy_debug_backup_key(_review_key(name)),
             _debug_backup_key("stats", name), _legacy_debug_backup_key(_stats_key(name)),

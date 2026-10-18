@@ -46,7 +46,7 @@ def _wrap(function, name):
             return await function(self, *args, **kwargs)
         gate = self._data_gate
         startup = name == "startup"
-        exclusive = startup or name == "reset_all"
+        exclusive = startup or name in {"reset_all", "_debug_diary_fill"}
         if gate.blocked and not startup:
             if name == "dashboard" and not gate.exclusive:
                 return {"backup_recovery_required": True, "status": {"enabled": False}}

@@ -264,10 +264,12 @@ export function BackgroundVideo(props: {
 }) {
   const ref = useRef<HTMLVideoElement | null>(null)
   const motion = useRef(props.appearance.motion)
+  const loading = useRef(props.media.loading)
   const onError = useRef(props.onError)
   const onReady = useRef(props.onReady)
   const syncPlayback = useRef<(() => void) | null>(null)
   motion.current = props.appearance.motion
+  loading.current = props.media.loading
   onError.current = props.onError
   onReady.current = props.onReady
   useEffect(() => {
@@ -312,8 +314,11 @@ export function BackgroundVideo(props: {
         waitingFrame = false
         video.style.opacity = "1"
       }
-      if (!announced) {
+      // A selection can return to this source without recreating the decoder.
+      // A new preview still needs its own ready notification.
+      if (!announced || loading.current) {
         announced = true
+        loading.current = false
         onReady.current()
       }
     }

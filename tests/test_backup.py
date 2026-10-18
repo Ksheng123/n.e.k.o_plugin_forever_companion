@@ -46,6 +46,7 @@ def records():
         "stats@Alice": {"backfilled": True, "first_seen": "2024-01-01"},
         "diary@Old @ role": [{"ts": "2025-06-01", "entry": "Deleted role remains"}],
         "pre_debug@journal@Alice": {"journal": [{"page_no": 1, "entries": []}], "archive": []},
+        "pre_debug@diary@Alice": {"diary": [{"entry": "Before diary debug", "source": "self"}]},
         "gallery_index": {"next": 8, "items": [{"id": "g1", "name": "Image", "mime": "image/png", "thumb": "", "size": 68}]},
         "gallery_img/g1": {"data_url": PNG, "mime": "image/png", "size": 68},
         "panel_appearance": {"bg_id": "g1", "dim": 0.2},
@@ -76,6 +77,17 @@ def test_archive_roundtrip_and_identity():
     assert restored == original
     assert manifest == actual
     assert actual["summary"] == {"roles": ["Alice", "Old @ role"], "diary": 2, "journal": 2, "review": 2, "images": 1}
+
+
+def test_141_backup_remains_readable_and_reexports_without_record_changes():
+    original = records()
+    original.pop("pre_debug@diary@Alice")
+    old_archive, _ = backup.make_archive(original, "1.4.1")
+    loaded, manifest = backup.read_archive(old_archive)
+    assert loaded == original and manifest["format_version"] == 1
+    new_archive, _ = backup.make_archive(loaded, "1.4.2")
+    reloaded, _ = backup.read_archive(new_archive)
+    assert reloaded == original
 
 
 @pytest.mark.parametrize("mutation,expected", [
@@ -310,6 +322,8 @@ def test_backup_root_refuses_code_directory_and_links(plugin_factory_full, tmp_p
     ("stats@Alice", {"days": {"2026-10-01": {"turns": {}}}}),
     ("stats@Alice", {"months": {"2026-09": {"tone": []}}}),
     ("pre_debug@journal@Alice", {"journal": [{"entries": "broken"}]}),
+    ("pre_debug@diary@Alice", {"diary": [{"entry": []}]}),
+    ("pre_debug@diary@Alice", {}),
     ("caps@*", {"whisper": "false"}),
     ("mood@Alice", {"valence": float("inf")}),
     ("cycle@Alice", {"params": []}),

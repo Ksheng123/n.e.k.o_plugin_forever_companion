@@ -52,7 +52,7 @@ def role_of(key: str, known=()) -> str:
         if key.startswith(prefix):
             name = key[len(prefix):]
             return name.removesuffix("|pre-debug") if _legacy_debug(key, known) else name
-    for kind in ("journal", "review", "stats"):
+    for kind in ("diary", "journal", "review", "stats"):
         prefix = f"pre_debug@{kind}@"
         if key.startswith(prefix):
             return key[len(prefix):]
@@ -281,10 +281,13 @@ def _stats(value):
 
 
 def _record(key, value, known):
-    debug = re.match(r"pre_debug@(journal|review|stats)@", key)
+    debug = re.match(r"pre_debug@(diary|journal|review|stats)@", key)
     if debug or _legacy_debug(key, known):
         kind = debug[1] if debug else key.split("@", 1)[0]
-        if kind == "journal":
+        if kind == "diary":
+            _fields(value, lists=("diary",))
+            _entries(value.get("diary"))
+        elif kind == "journal":
             _fields(value, lists=("journal", "archive"))
             _entries(value.get("journal", []), "journal")
             _entries(value.get("archive", []), "journal")

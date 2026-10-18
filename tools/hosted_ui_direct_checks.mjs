@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { recordFixture, largeFixture } from "./hosted_ui_video_checks.mjs"
+import { selectMedia } from "./hosted_ui_settings_checks.mjs"
 
 const VIDEO = "video.tm-bg-video"
 
@@ -87,6 +88,7 @@ export async function directChecks(browser, sources, origin, output, helpers) {
   const screenshots = []
   const measurements = []
   const measureOnly = process.argv.includes("--measure-only")
+  const switchOnly = process.argv.includes("--switch-only")
   const fixture = largeFixture(await recordFixture(browser, output), output)
   sources.qaVideoFixture = fixture.source
   sources.qaDirectPath = `/plugin/forever_companion/ui/${fixture.sha256}.webm`
@@ -106,6 +108,75 @@ export async function directChecks(browser, sources, origin, output, helpers) {
     }
   }
   try {
+    if (switchOnly || process.argv.includes("--switch")) {
+      for (const width of [1280, 390]) {
+        const loaded = await loadPage(browser, origin, {
+          locale: "en", wallpaper: "video", direct: "true", tab: "settings",
+        }, width, 900, "light", "no-preference")
+        try {
+          await assertDirectMoving(loaded)
+          await check(`switch-${width}-return-to-playing-video-clears-loading`, async () => {
+            await loaded.page.evaluate(() => { window.qaDelays["qa-wallpaper-b"] = 1000 })
+            for (let round = 0; round < 4; round++) {
+              await selectMedia(loaded.frame, "image")
+              await loaded.frame.locator('[data-item-id="qa-wallpaper-b"] .tm-gallery-pick').click()
+              await loaded.page.waitForFunction(() => window.qaMessages.some(message =>
+                message.payload?.actionId === "get_gallery_image" && message.payload.args.item_id === "qa-wallpaper-b"))
+              await selectMedia(loaded.frame, "video")
+              await loaded.frame.locator('[data-item-id="qa-video"] .tm-gallery-pick').click()
+              await loaded.frame.waitForFunction(() => !document.querySelector(".tm-video-loading"), null, { timeout: 2500 })
+              await assertDirectMoving(loaded)
+            }
+            assert.equal((await chunks(loaded)).length, 0)
+          })
+          await check(`switch-${width}-image-and-video-alternation`, async () => {
+            for (let round = 0; round < 6; round++) {
+              await selectMedia(loaded.frame, "image")
+              await loaded.frame.locator('[data-item-id="qa-wallpaper"] .tm-gallery-pick').click()
+              await loaded.frame.waitForFunction(() => !document.querySelector("video.tm-bg-video"))
+              await selectMedia(loaded.frame, "video")
+              await loaded.frame.locator('[data-item-id="qa-video"] .tm-gallery-pick').click()
+              await assertDirectMoving(loaded)
+              await loaded.frame.waitForFunction(() => !document.querySelector(".tm-video-loading"))
+            }
+            assert.equal((await chunks(loaded)).length, 0)
+            const path = join(output, `switch-${width}-playing.png`)
+            await loaded.page.screenshot({ path, animations: "disabled" })
+            screenshots.push({ id: `switch-${width}`, path, layout: await inspectLayout(loaded.frame), errors: [...loaded.errors], diagnostics: [] })
+          })
+          await check(`switch-${width}-multiple-video-sources-release-old-players`, async () => {
+            for (const digit of ["1", "2", "3"]) {
+              copyFileSync(fixture.assetPath, join(directory, `${digit.repeat(64)}.webm`))
+            }
+            await loaded.page.evaluate(() => {
+              const fixture = window.qaFixture
+              for (const digit of ["1", "2", "3"]) {
+                const id = `qa-video-${digit}`
+                fixture.videos[id] = { ...fixture.videos["qa-video"],
+                  playback_path: `/plugin/forever_companion/ui/${digit.repeat(64)}.webm` }
+                fixture.gallery.push({ ...fixture.gallery.find(item => item.id === "qa-video"), id, name: id })
+              }
+            })
+            await destroyAndReopen(loaded)
+            await assertDirectMoving(loaded)
+            await loaded.frame.locator(".tm-tab").nth(7).click()
+            for (const digit of ["1", "2", "3", "2", "1", "3", "1", "2", "3"]) {
+              await selectMedia(loaded.frame, "video")
+              await loaded.frame.locator(`[data-item-id="qa-video-${digit}"] .tm-gallery-pick`).click()
+              await loaded.frame.waitForFunction(source =>
+                document.querySelector("video.tm-bg-video")?.currentSrc === source,
+              `${origin}/plugin/forever_companion/ui/${digit.repeat(64)}.webm`)
+              await assertDirectMoving(loaded)
+              await loaded.frame.waitForFunction(() => !document.querySelector(".tm-video-loading"), null, { timeout: 2000 })
+              assert.equal((await chunks(loaded)).length, 0)
+              assert(await loaded.frame.evaluate(() => window.qaCreatedVideos.every(video =>
+                video.isConnected || (!video.getAttribute("src") && video.paused))))
+            }
+          })
+        } finally { await loaded.context.close() }
+      }
+      if (switchOnly) return { checks, screenshots, measurements }
+    }
     await check("direct-host-route-range-mime-cache-and-traversal", async () => {
       const range = await fetch(`${origin}${sources.qaDirectPath}`, { headers: { Range: "bytes=0-255" } })
       assert.equal(range.status, 206)

@@ -29,6 +29,7 @@ def seed(name="Alice"):
         f"weekly@{name}": [{"ts": "2025-08-01", "summary": "Legacy weekly"}],
         f"review_stats@{name}": {"turns": 50},
         f"pre_debug@journal@{name}": {"journal": [{"page_no": 1, "entries": []}]},
+        f"pre_debug@diary@{name}": {"diary": [{"entry": "Before diary debug"}]},
         f"pre_debug@review@{name}": {"entries": [{"text": "Before debug"}]},
         f"pre_debug@stats@{name}": {"days": {"2025-08-01": {"turns": 10}}},
         f"journal@{name}|pre-debug": {"journal": [{"page_no": 1, "entries": []}]},
@@ -107,7 +108,7 @@ def test_reset_rechecks_host_role_after_confirmation(plugin_factory_full, tm):
 @pytest.mark.parametrize("key", [
     "cycle@Alice", "mood@Alice", "diary@Alice", "journal@Alice", "review@Alice",
     "journal_archive@Alice", "review_archive@Alice", "stats@Alice",
-    "weekly@Alice", "review_stats@Alice", "pre_debug@journal@Alice",
+    "weekly@Alice", "review_stats@Alice", "pre_debug@journal@Alice", "pre_debug@diary@Alice",
 ])
 def test_reset_does_not_report_success_on_store_failure(plugin_factory_full, tm, key):
     plugin = plugin_factory_full(current_lanlan="Alice", store_initial=seed())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -194,6 +195,70 @@ def test_playback_eviction_is_bounded_and_never_evicts_originals(file_plugin, mo
     monkeypatch.setattr(media_playback, "_GALLERY_VIDEO_HARD_MAX_BYTES", 150)
     direct(file_plugin, ids[0])
     assert media_playback.usage(file_plugin) <= 150
+
+
+def test_playback_eviction_prefers_least_recently_used_copy(file_plugin):
+    ids = [add_video(file_plugin, synthetic_mp4(100 + number)).value["id"] for number in range(3)]
+    enable(file_plugin)
+    first = direct(file_plugin, ids[0]).value["playback_path"].rsplit("/", 1)[1]
+    second = direct(file_plugin, ids[1]).value["playback_path"].rsplit("/", 1)[1]
+    direct(file_plugin, ids[0])
+    third = direct(file_plugin, ids[2]).value["playback_path"].rsplit("/", 1)[1]
+    assert {path.name for path in media_playback.root(file_plugin).glob("*.mp4")} == {first, third}
+    assert second not in file_plugin._playback_verified
+
+
+def test_playback_eviction_skips_copy_still_open_in_windows(file_plugin, monkeypatch):
+    ids = [add_video(file_plugin, synthetic_mp4(100 + number)).value["id"] for number in range(3)]
+    enable(file_plugin)
+    first = direct(file_plugin, ids[0]).value["playback_path"].rsplit("/", 1)[1]
+    direct(file_plugin, ids[1])
+    original = Path.unlink
+
+    def locked(path, *args, **kwargs):
+        if path.name == first:
+            raise PermissionError("synthetic active Range reader")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    result = direct(file_plugin, ids[2]).value
+    assert result["playback_path"]
+    third = result["playback_path"].rsplit("/", 1)[1]
+    assert {path.name for path in media_playback.root(file_plugin).glob("*.mp4")} == {first, third}
+    assert all(file_bytes(file_plugin, gid) for gid in ids)
+
+
+def test_playback_eviction_with_all_copies_locked_preserves_bounds(file_plugin, monkeypatch):
+    ids = [add_video(file_plugin, synthetic_mp4(100 + number)).value["id"] for number in range(3)]
+    enable(file_plugin)
+    names = {direct(file_plugin, gid).value["playback_path"].rsplit("/", 1)[1] for gid in ids[:2]}
+    original = Path.unlink
+
+    def locked(path, *args, **kwargs):
+        if path.name in names:
+            raise PermissionError("synthetic active Range reader")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    assert "playback_path" not in direct(file_plugin, ids[2]).value
+    assert {path.name for path in media_playback.root(file_plugin).glob("*.mp4")} == names
+    assert all(file_bytes(file_plugin, gid) for gid in ids)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires Windows file sharing semantics")
+def test_playback_eviction_with_real_windows_reader(file_plugin):
+    ids = [add_video(file_plugin, synthetic_mp4(100 + number)).value["id"] for number in range(3)]
+    enable(file_plugin)
+    first = direct(file_plugin, ids[0]).value["playback_path"].rsplit("/", 1)[1]
+    direct(file_plugin, ids[1])
+    directory = media_playback.root(file_plugin)
+    with (directory / first).open("rb") as reader:
+        with pytest.raises(PermissionError):
+            (directory / first).unlink()
+        result = direct(file_plugin, ids[2]).value
+        assert result["playback_path"]
+        assert reader.read() == synthetic_mp4(100)
+        assert len(list(directory.glob("*.mp4"))) == 2
 
 
 def test_playback_disk_exhaustion_falls_back_and_preserves_original(file_plugin, monkeypatch):

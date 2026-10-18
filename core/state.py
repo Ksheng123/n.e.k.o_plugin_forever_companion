@@ -149,7 +149,7 @@ def _debug_backup_key(which: str, lanlan: str) -> str:
 
     过去写成 `f"{_journal_key(name)}|pre-debug"`：把"我是备份"编码成后缀，与真实
     数据同前缀（任何将来按前缀枚举 store 的代码都会把它当角色数据误读）。
-    which ∈ {journal, review, stats}（同一入口的 archive 键打包在同一个 blob 里）。
+    which ∈ {diary, journal, review, stats}（同一入口的 archive 键打包在同一个 blob 里）。
     """
     return f"{_DEBUG_BACKUP_PREFIX}{which}@{lanlan}"
 

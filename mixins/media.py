@@ -121,8 +121,12 @@ class MediaGalleryMixin:
                 round((time.monotonic() - started) * 1000),
             )
             return f"/plugin/forever_companion/ui/{name}"
-        except Exception:
-            self.logger.info("gallery playback: status=fallback elapsed_ms={}", round((time.monotonic() - started) * 1000))
+        except Exception as exc:
+            reason = exc.code if isinstance(exc, GalleryMediaError) else type(exc).__name__
+            self.logger.info(
+                "gallery playback: status=fallback reason={} elapsed_ms={}",
+                reason, round((time.monotonic() - started) * 1000),
+            )
             return ""
 
     async def _media_io(self, function, *args, error: str = "video_save_failed"):

@@ -159,12 +159,14 @@ function assertSectionOrder(geometry) {
     assert(boundary.borderTop >= 1 && boundary.paddingTop >= 8, `${name}: reading sections need visible boundaries and padding`)
   }
   const purpose = section("purpose")
+  const actions = section("actions")
   const scenarios = section("scenarios")
   const limits = section("limits")
   const requirements = section("requirements")
   const demo = section("demo")
-  assert(scenarios.top >= purpose.bottom + 8, "Scenarios need clear space after the purpose")
-  assert(limits.top >= purpose.bottom + 8, "Notes need clear space after the purpose")
+  if (actions) assert(actions.top >= purpose.bottom + 8, "Mood explanations need clear space after the purpose")
+  assert(scenarios.top >= (actions || purpose).bottom + 8, "Scenarios need clear space after the preceding section")
+  assert(limits.top >= (actions || purpose).bottom + 8, "Notes need clear space after the preceding section")
   assert(requirements.top >= Math.max(scenarios.bottom, limits.bottom) + 8, "Usage conditions need clear space after scenarios and notes")
   assert(demo.top >= requirements.bottom + 8, "The demonstration must follow the visible usage conditions")
   assert(geometry.technical?.top >= demo.bottom + 8, "Technical details need clear space after the demonstration")
@@ -294,6 +296,19 @@ export async function introChecks(browser, sources, origin, output, helpers) {
           }
           assert.deepEqual(await loaded.frame.locator(`${SECTION.scenarios} li`).allTextContents(), payload.scenarios.map(value => textFor(sources, locale, value)))
           assert.deepEqual(await loaded.frame.locator(`${SECTION.limits} li`).allTextContents(), payload.limits.map(value => textFor(sources, locale, value)))
+          const actions = payload.actions || []
+          assert.equal(await loaded.frame.locator(".tm-ci-actions").count(), actions.length ? 1 : 0)
+          assert.equal(await loaded.frame.locator(".tm-ci-actions [data-action]").count(), actions.length)
+          for (const action of actions) {
+            const row = loaded.frame.locator(`.tm-ci-actions [data-action="${action.id}"]`)
+            assert.equal(await row.locator("dt").innerText(), textFor(sources, locale, action.label))
+            assert.equal(await row.locator("dd").innerText(), textFor(sources, locale, action.description))
+            await assertScrollVisibility(loaded.frame, `.tm-ci-actions [data-action="${action.id}"] dd`)
+          }
+          if (actions.length) {
+            assert.equal(await loaded.frame.locator(".tm-ci-actions .tm-ci-h").innerText(), sources.messages[locale]["panel.capintro.mood_engine.actionsTitle"])
+            await loaded.page.screenshot({ path: join(output, `${id}-actions.png`), animations: "disabled" })
+          }
           assert.deepEqual(await loaded.frame.locator(".tm-ci-node-label").allTextContents(), payload.flow.map(node => textFor(sources, locale, node.label)))
           assert.equal(await loaded.frame.locator(TECHNICAL).getAttribute("open"), null, "Advanced technical information must start collapsed")
           assert.equal(await loaded.frame.locator(`${SECTION.requirements} details`).count(), 0, "Usage conditions must not be hidden in a disclosure")

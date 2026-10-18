@@ -45,6 +45,7 @@ export type CapIntroPayload = {
   scenarios?: IntroText[]
   limits?: IntroText[]
   flow?: IntroFlowNode[]
+  actions?: { id: string; label: IntroText; description: IntroText }[]
   deps?: string[]
   config_keys?: string[]
   llm?: string
@@ -109,6 +110,7 @@ export function CapIntroView(props: CapIntroViewProps) {
 
   const scenarios = listTexts(t, intro && intro.scenarios)
   const limits = listTexts(t, intro && intro.limits)
+  const actions = (intro && intro.actions) || []
   const deps = (intro && intro.deps) || []
   const configKeys = (intro && intro.config_keys) || []
   const tools = (intro && intro.tools) || []
@@ -150,6 +152,19 @@ export function CapIntroView(props: CapIntroViewProps) {
             <h4 className="tm-ci-h">{t("panel.capintro.purpose", { defaultValue: "功能作用" })}</h4>
             <p className="tm-ci-purpose">{resolveText(t, intro.purpose)}</p>
           </section>
+          {actions.length ? (
+            <section className="tm-ci-sec tm-ci-actions" data-section="actions">
+              <h4 className="tm-ci-h">{t("panel.capintro.mood_engine.actionsTitle", { defaultValue: "情绪状态与结束方式" })}</h4>
+              <dl className="tm-ci-facts">
+                {actions.map((action) => (
+                  <div key={action.id} className="tm-ci-fact" data-action={action.id}>
+                    <dt>{resolveText(t, action.label)}</dt>
+                    <dd>{resolveText(t, action.description)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ) : null}
           <div className="tm-ci-grid">
             <section className="tm-ci-sec tm-ci-scenarios" data-section="scenarios">
               <h4 className="tm-ci-h">{t("panel.capintro.scenarios", { defaultValue: "主要场景" })}</h4>

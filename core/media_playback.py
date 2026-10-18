@@ -101,16 +101,32 @@ def prepare(
     if (target.is_file() and len(entries) <= 2
         and sum(path.stat().st_size for path in entries) <= limit
         and verified.get(name) == (signature, _signature(target))):
+        verification = verified.pop(name)
+        verified[name] = verification
         return name, True
 
     # At most two copies and 512 MiB total; eviction never touches originals.
-    others = sorted((path for path in entries if path != target), key=lambda path: path.stat().st_mtime_ns)
+    recency = {key: index for index, key in enumerate(verified)}
+    others = sorted(
+        (path for path in entries if path != target),
+        key=lambda path: (recency.get(path.name, -1), path.stat().st_mtime_ns),
+    )
     total = sum(path.stat().st_size for path in others)
-    while others and (len(others) >= 2 or total + size > limit):
-        old = others.pop(0)
-        total -= old.stat().st_size
-        old.unlink()
+    for old in list(others):
+        if len(others) < 2 and total + size <= limit:
+            break
+        old_size = old.stat().st_size
+        try:
+            old.unlink()
+        except PermissionError:
+            # Windows may still serve the old player's Range request.
+            # Try another copy without invalidating the occupied asset.
+            continue
+        others.remove(old)
+        total -= old_size
         verified.pop(old.name, None)
+    if len(others) >= 2 or total + size > limit:
+        raise media_files.MediaFileError("video_playback_busy")
     if target.exists():
         target.unlink()
         verified.pop(name, None)

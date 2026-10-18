@@ -210,6 +210,10 @@ def test_i18n_files_cover_intro_keys(locale_file):
         required += [scenario_key(cap_id, i) for i in range(1, len(intro.scenarios) + 1)]
         required += [limit_key(cap_id, i) for i in range(1, len(intro.limits) + 1)]
         required += [flow_key(cap_id, i) for i in range(1, len(intro.flow) + 1)]
+        if intro.actions:
+            required += [f"panel.capintro.{cap_id}.actionsTitle"]
+        for action_id, _, _ in intro.actions:
+            required += [f"mood.{action_id}", f"panel.capintro.{cap_id}.action.{action_id}"]
         missing = [k for k in required if not messages.get(k)]
         assert not missing, f"{locale_file} 缺 key: {missing[:3]} ({cap_id})"
 
@@ -223,6 +227,9 @@ def test_i18n_files_cover_intro_keys(locale_file):
                 assert messages[limit_key(cap_id, i)] == s, (cap_id, i)
             for i, n in enumerate(intro.flow, 1):
                 assert messages[flow_key(cap_id, i)] == n.label, (cap_id, i)
+            for action_id, label, description in intro.actions:
+                assert messages[f"mood.{action_id}"] == label, (cap_id, action_id)
+                assert messages[f"panel.capintro.{cap_id}.action.{action_id}"] == description, (cap_id, action_id)
         # 声明表没有的能力不应留孤儿 key
         orphan = [
             k for k in messages
@@ -247,6 +254,22 @@ def test_intro_chinese_copy_stays_brief():
         assert len(intro.purpose) <= 90, f"{cap_id}: purpose should remain a short summary"
         assert all(len(text) <= 45 for text in intro.scenarios), cap_id
         assert all(len(text) <= 85 for text in intro.limits), cap_id
+
+
+def test_mood_action_guide_covers_states_and_release_without_diary_tools():
+    from forever_companion.core.capabilities import CAPABILITY_SPECS
+    from forever_companion.core.intros import build_intro_payload
+
+    spec = CAPABILITY_SPECS["mood_engine"]
+    payload = build_intro_payload(spec, _fake_ref)
+    actions = {action["id"]: action for action in payload["actions"]}
+    assert len(actions) == len(payload["actions"]) == 9
+    assert {f"mood_{action_id}" for action_id in actions} == set(spec.tools) - {"mood_drift_bottle"}
+    assert actions["rising_tide"]["label"]["$i18n"] == "mood.rising_tide"
+    assert "心情好了" in actions["rising_tide"]["description"]["default"]
+    assert "不是新的持续状态" in actions["rising_tide"]["description"]["default"]
+    assert "默认 120 分钟的兜底解除" in actions["seek_harbor"]["description"]["default"]
+    assert build_intro_payload(CAPABILITY_SPECS["whisper"], _fake_ref)["actions"] == []
 
 
 def test_intro_copy_keeps_hint_and_simulation_boundaries():

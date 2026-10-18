@@ -15,7 +15,7 @@ def _source(relative: str) -> str:
 def test_intro_places_practical_information_before_the_demo() -> None:
     source = _source("ui/capintro.tsx")
     sections = re.findall(r'<section\b[^>]*data-section="([^"]+)"', source)
-    assert sections == ["purpose", "scenarios", "limits", "requirements", "demo"]
+    assert sections == ["purpose", "actions", "scenarios", "limits", "requirements", "demo"]
     assert source.index('data-section="requirements"') < source.index("<CapPrincipleDemo")
     assert "panel.capintro.masterRequired" in source
     assert source.index("panel.capintro.masterRequired") < source.index("<details")

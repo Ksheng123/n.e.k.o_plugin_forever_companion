@@ -60,12 +60,14 @@ class CapIntro:
     scenarios: 主要场景（2~4 条「你会看到什么」）
     limits:    限制与注意事项（2~5 条，如实说边界，不粉饰）
     flow:      原理演示链（3~6 节点）
+    actions:   可选的情绪动作说明（标识、显示名、含义与时限）
     """
 
     purpose: str
     scenarios: tuple[str, ...]
     limits: tuple[str, ...]
     flow: tuple[FlowNode, ...]
+    actions: tuple[tuple[str, str, str], ...] = ()
 
 
 # ---- i18n key 派生（唯一规则，改不得：i18n JSON 按此登记翻译）----
@@ -217,12 +219,25 @@ CAP_INTROS: dict[str, CapIntro] = {
             "语气感知、对话片段、个人日记和我的日记依赖此功能，关闭后会一并停用",
             "部分情绪状态会临时暂停宿主主动消息，结束后恢复原设置",
             "手动演示与角色自主触发的情绪分开记录，不混入自主情绪统计",
+            "每个角色同时保留一个当前情绪状态，新选择会替换旧状态；她也可以不调用工具直接调整回应",
+            "限时状态可设 1～720 分钟；到期只结束记录，不代表已经释怀，也没有必须依次冷战、爆发、和好的顺序",
         ),
         flow=(
             FlowNode("src", "互动信号"),
             FlowNode("gate", "角色调用情绪工具"),
             FlowNode("proc", "更新情绪状态与时限"),
             FlowNode("out", "记录状态与心情变化"),
+        ),
+        actions=(
+            ("ebb_tide", "冷战沉默", "暂时想保持距离，是否沉默、解释或回应由她决定。限时记录，默认 10 分钟，可在设置中调整；期间暂停主动消息。"),
+            ("sea_fog", "已读不回", "暂时不想接当前话题，可简短回应、换话题或稍后接回，不代表真实已读回执。限时记录，默认 10 分钟，可在设置中调整；期间暂停主动消息。"),
+            ("shallow_reef", "敷衍应付", "不太想展开交流，但必要的问题仍可认真回答，不强制使用短句。限时记录，默认 10 分钟，可在设置中调整；期间暂停主动消息。"),
+            ("storm_surge", "情绪风暴", "想表达当前对话里的强烈感受，表达方式由她决定，不要求持续爆发。限时记录，默认 10 分钟，可在设置中调整；期间暂停主动消息。"),
+            ("seek_harbor", "想要被安抚", "希望被关心或理解，可以直接表达需要，也可以暂时不说。由后续选择或手动结束，另有默认 120 分钟的兜底解除，可在设置中调整或关闭；期间暂停主动消息。"),
+            ("ripple", "心有涟漪", "一点在意或别扭，不等于强烈冲突。默认记录 15 分钟，不暂停主动消息；是否释怀由她决定。"),
+            ("warm_current", "暖流涌动", "想亲近或陪伴，表达沿用自身性格，不强制撒娇。默认记录 30 分钟，不暂停主动消息；与低落时想被安抚不同。"),
+            ("spring_tide", "满潮欢喜", "记录当下的开心或兴奋，可以分享好事，也可安静享受。默认记录 30 分钟，不暂停主动消息；与结束旧状态不同。"),
+            ("rising_tide", "心情转晴", "也就是「心情好了」：她自主结束之前的情绪记录，恢复因情绪暂停的主动消息。它不是新的持续状态，也不要求立刻亲近或完全没有余绪。"),
         ),
     ),
     "tone_sense": CapIntro(
@@ -348,6 +363,14 @@ def build_intro_payload(spec: Any, ref: Callable[[str, str], JsonObject]) -> Jso
         "flow": [
             {"kind": n.kind, "label": ref(flow_key(spec.id, i), n.label)}
             for i, n in enumerate(intro.flow, 1)
+        ],
+        "actions": [
+            {
+                "id": action_id,
+                "label": ref(f"mood.{action_id}", label),
+                "description": ref(f"{_base(spec.id)}.action.{action_id}", description),
+            }
+            for action_id, label, description in intro.actions
         ],
         "deps": list(spec.depends),
         "config_keys": config_keys,
