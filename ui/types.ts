@@ -59,6 +59,7 @@ export type Settings = {
   fragments_enabled?: boolean
   fragments_slot?: string
   fragments_mode?: string
+  fragments_daily_limit?: number
   review_enabled?: boolean
   review_slot?: string
   review_mode?: string
@@ -407,6 +408,7 @@ export type FormValues = {
   fragments_enabled: boolean
   fragments_slot: string
   fragments_mode: string
+  fragments_daily_limit: number
   review_enabled: boolean
   review_slot: string
   review_mode: string

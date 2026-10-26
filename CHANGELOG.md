@@ -6,6 +6,65 @@
 
 ---
 
+### 1.5.0：记忆治理——片段判重与取代、记忆自检、碎片日限面板可调（2026-10-26，待发行）
+
+约定：本版由 **玫随（GitHub [@qaqms](https://github.com/qaqms)）与 Coder_Ksheng**
+共同维护；`[plugin.author].name` 仍为原作者 GitHub ID `qaqms`（市场按该字段认归属）。
+下方 2026-10-10 的「1.5.0：直接视频加载…」是 1.3.9 正式发行前的历史本地测试编号，
+不是发行序列，与本条目无关（见 `tools/RELEASE_PLAN_20261015.md`）。
+
+**一、碎片生命周期（`status: active/superseded`）**
+
+- 碎片落盘带 `status=active`；`recall_fragments` 加生命周期闸，只返 active。
+  缺省按 active 兼容 1.4.2 存量数据，检索结果与旧版一致。
+- 判为"更新了某条"时：新增一条、旧条转 `superseded`、新条记 `supersedes` 指向旧条
+  时间戳。旧条**内容原样保留**（面板仍可翻到、可单条删除），只是退出检索。
+- 为什么旧条不删：误标一旦删除就不可恢复，而"退出检索"已经达到治理目的；
+  内容留着，用户自己能在面板上发现并纠正。
+
+**二、提取时带已有记忆（`new/duplicate/supersede`）**
+
+- `build_fragment_prompt(user, her, existing=None)` 新增 `existing`：把最近 10 条
+  现行片段排成 `[N] [kind] quote` 清单，空列表显式写「（无）」。
+- 模型回复从 5 字段扩到 7 字段（+`relation`/`target`）。`relation` 未知或缺失按
+  `new`；`target` 只在 supersede 时解析，类型坏归 0，越界一律按 `new`——
+  宁可多记一条，也不能因模型回了坏编号就标废一条正确记忆。
+- `recall_fragments` 返回**时间倒序**，`[1]` 是最新那条，prompt 里写明，否则模型
+  会把"谁更新谁"判反。
+- 坏 JSON **不计入通道熔断**：熔断账只记请求层失败；模型答散文属输出质量问题，
+  计进去会让两次坏回复永久熔掉一条本来通畅的通道。
+
+**三、记忆自检工具 `mood_check_memory`（只给建议，不改数据）**
+
+- 一次看 20 条（上限 30），30 分钟节流，`ignore_pace=True`（不受语气节流节拍约束）。
+- 只返回整理建议，不写任何数据；编号越界只丢那一条，不整单拒绝。
+- 为什么只给建议：自动合并/删除记忆是**不可逆**的，而模型判错的代价远高于
+  "用户看到建议后自己点两下"。
+
+**四、`[fragments].daily_limit` 接线并在面板可调**
+
+- 1.4.2 里这一项是**死代码**（`fragment_capture_used/spend/left` 从未被调用）。
+  本版接进提取门控链：位置在"宿主通道确认可用"之后、"真正发请求"之前，超限时
+  推进水位并打时间戳，不调 `_channel_break_note`（限流不是通道故障）。
+- 出厂 60。两本账分工不变：`[agent_tier].daily_budget=20` 保宿主免费额度（500 次/天
+  与宿主 agent 功能共用），本条保用户自己的花费，槽位切到付费档后它是唯一剩下的次数闸。
+- 面板「设置 · 日记」页新增数字框（0~500，0 = 今天不分析），走 `update_settings`
+  的 `fragments_daily_limit`，与读取口 `_fragments_daily_limit()` 同一把钳制尺子。
+  越界**钳制**而不拒收（与 `agent_daily_budget` 的拒收口径不同：那条花的是公共池子，
+  笔误代价大；这条花自己的钱，钳成边界值更好预期）。非数值回稳定码
+  `invalid_fragments_daily_limit`。
+
+**五、契约与文档同步**
+
+- 配置三处同步（`plugin.toml` / `config.example.toml` / README 配置表）。
+- 八语新增 4 键：`fields.fragments_daily_limit`、`panel.settings.fragmentsDailyLimit`、
+  `panel.settings.fragmentsDailyLimitHelp`、`panel.errors.invalidFragmentsDailyLimit`
+  （八语键集仍完全一致，各 1092 键）。
+- 新增门：`test_ui_fragments_limit_range_matches_backend_bounds`（前端 0/500 与
+  `_FRAGMENT_MIN/MAX_DAILY_LIMIT` 同源）、`_UI_FORM_DEFAULTS` 增
+  `fragments_daily_limit`（前端兜底默认值与出厂值同源）。
+- 版本：`plugin.toml` / `pyproject.toml` / `uv.lock` / README 统一为 1.5.0。
+
 ### 1.4.2：壁纸预览、情绪介绍与调试日记保护（2026-10-18，正式发行）
 
 - 修复图片与动态壁纸反复切换后加载提示不结束；按最近使用顺序回收播放副本，
