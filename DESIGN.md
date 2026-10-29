@@ -295,6 +295,25 @@
   笔误代价是一整天的额度流失；这条花自己的钱，钳成边界值更好预期。非数值回稳定码
   `invalid_fragments_daily_limit`。
 
+### 五、碎片与语气感知的轮次水位隔离（1.5.1）
+
+- 症状：真机首跑，总开关打开、语气感知一切正常，但**碎片一条都不落**，日志里连
+  `fragment capture dormant` 都没有——整条链路静默。
+- 根因：两者共用 `shard.last_turn_marker`（"我读到第几轮了"）。tick 里语气感知排在
+  碎片**之前**，且每轮通过门控就推进该水位（`services/emotion_sense.py:392`）；
+  碎片随后调 `_poll_recent_turns(advance=False)`，而那道判定正是
+  `if marker == shard.last_turn_marker: return None`（`emotion_sense.py:359`）
+  → 碎片永远判"没有新轮"。默认配置（`[emotion_sense].enabled=true`、
+  `check_rate=1.0`）下等于碎片从未真正工作过。
+- 修法：碎片改用 `peek=True`——只取最新一轮、**完全不参与水位判定**；本轮是否"新"
+  由碎片自己的 `last_fragment_marker` 判（`mixins/senses.py` 里那套基线/比较）。
+  `peek=True` 本就是本仓既有用法（`_collect_review_sample_turns` 成文摘样，
+  注释写明"peek 不动水位"）。
+- 纪律：**谁需要"这轮是不是新的"，谁就自己记水位**。共用一条水位必然互相吞轮，
+  而且失败是静默的——本次就是靠"读了 store 却没有条目"才反查出来。
+- 回归测试 `test_capture_still_gets_turn_after_tone_advanced_watermark` 必须用
+  真实的 `_poll_recent_turns` 驱动：把轮询 stub 掉，这个坑会被桩挡道而测不出来。
+
 ## 生日轻语（1.3.1）
 
 记住主人生日：当天玩家**首次聊天**时递一条 read 轻语（说不说、怎么说由她），

@@ -6,6 +6,35 @@
 
 ---
 
+### 1.5.1：碎片与语气感知的轮次水位隔离（2026-10-29，待发行）
+
+真机首跑发现：总开关打开、语气感知一切正常，但自动碎片**一条都不落**，日志里连
+`fragment capture dormant` 都没有，全程静默。
+
+- **根因**：碎片与语气感知共用 `shard.last_turn_marker`（"读到第几轮"）。tick 里
+  语气感知先跑且每轮推进它（`services/emotion_sense.py:392`）；碎片随后调
+  `_poll_recent_turns(advance=False)`，该方法在 `emotion_sense.py:359` 判
+  `marker == shard.last_turn_marker` 就返回 None → 碎片永远"没有新轮"，静默跳过。
+  这个缺陷从 **1.0.0（第一个正式版本）** 起就存在：那一版（`2dc87bb`）里 tick 顺序已经是语气感知
+  在前（`__init__.py:2035` → `2038`）、碎片已经是 `advance=False` 轮询（`__init__.py:1778`）、
+  语气感知也已经在对同一个 `last_turn_marker` 写"门控全过：推进水位"（`emotion_sense.py:379`）。
+  默认配置下两者都开，等于碎片从未真正工作。
+- **修法**：碎片改用 `peek=True`（只取最新一轮、不参与水位判定），本轮新旧交回碎片
+  自己的 `last_fragment_marker`。`peek=True` 是本仓既有用法（成文摘样同款，
+  注释"peek 不动水位"）。
+- **回归测试**：`test_capture_still_gets_turn_after_tone_advanced_watermark`，
+  用真实 `_poll_recent_turns` + 假 recent_file 驱动（把轮询 stub 掉会让这个坑被桩
+  挡掉）；已验证该用例在旧代码上必挂（`assert False is True`）。
+- **真机验证**（2026-10-29，Windows + 宿主 1.x，真实模型）：修复后语气感知与碎片
+  同时在跑；碎片落盘 2 条 `status=active`、`recall` 无重复原话、日限账本
+  （`frag_limit_used`）与 agent 档总账逐一对得上。
+- **安装/调试注意**：宿主面板「重载」之后插件入口表不会重新登记，面板动作会一律
+  返回 `reason=no_plugin_entries`（表现为 `UI action 'xxx' is not a plugin entry`）。
+  改完代码请用**「停止 → 启动」**，不要用「重载」。
+- 版本：`plugin.toml` / `pyproject.toml` / `uv.lock` / README 统一为 1.5.1。
+- 全量回归：1088 passed / 46 skipped / 5 errors（5 个 error 为 `test_savebar.py`
+  的 node 环境问题，改动前既有）。
+
 ### 1.5.0：记忆治理——片段判重与取代、记忆自检、碎片日限面板可调（2026-10-26，待发行）
 
 约定：本版由 **玫随（GitHub [@qaqms](https://github.com/qaqms)）与 Coder_Ksheng**

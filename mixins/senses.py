@@ -534,8 +534,13 @@ class SensesMixin:
         )
         if now - shard.last_fragment_analysis_ts < max(0.0, min_interval):
             return False
-        # advance=False：这轮是否"新"由碎片自己的水位判定（语气感知的抽样/门控不牵连）
-        turn = await self._poll_recent_turns(shard, lanlan=lanlan, advance=False)
+        # peek=True：只读最新一轮，不参与"有没有新轮"的水位判定。为什么不能用
+        # advance=False：那道判定比较的是 shard.last_turn_marker，而语气感知在 tick 里
+        # 排在碎片**之前**且每轮都会推进它——碎片后跑就永远判"没有新轮"，静默跳过
+        # （1.5.0 真机实测：语气感知开着时碎片一条都不落，日志里连 dormant 都没有）。
+        # 本轮是否"新"交给碎片自己的 last_fragment_marker 判定（下面 543-547 行那套
+        # 基线/比较），两本水位各记各的，互不吞轮。
+        turn = await self._poll_recent_turns(shard, lanlan=lanlan, peek=True)
         if turn is None:
             return False
         user_text, her_text = turn

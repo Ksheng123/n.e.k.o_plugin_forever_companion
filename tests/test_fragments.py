@@ -740,3 +740,55 @@ def test_tool_mood_disabled_rejects(plugin_factory) -> None:
     assert hasattr(result, "error")
     result2 = run(p.tool_write_journal(events="x"))
     assert hasattr(result2, "error")
+
+
+# ---------- 与语气感知的水位隔离（1.5.1：真机翻车回归）----------
+
+
+def test_capture_still_gets_turn_after_tone_advanced_watermark(plugin_factory) -> None:
+    """语气感知先把轮次水位推到最新后，碎片仍必须拿到这一轮。
+
+    真机现场（1.5.0 实测）：tick 里语气感知排在碎片之前，且每轮通过门控就写
+    ``shard.last_turn_marker``；碎片原先用 ``advance=False`` 轮询，而那道判定比的
+    正是同一个 ``last_turn_marker``——于是碎片后跑永远判"没有新轮"，一条都不落，
+    全程连 dormant 日志都没有。修法是改用 ``peek=True``（只读最新一轮、不参与水位
+    判定），新旧由碎片自己的 ``last_fragment_marker`` 判。
+
+    用真实 `_poll_recent_turns` + 假 recent_file 响应驱动，不 stub 轮询本身，
+    否则这个坑会被桩挡掉（本文件其余集成用例都是 stub 的）。
+    """
+    p = plugin_factory()
+    p._fragments_cfg.update({"daily_limit": 10, "min_interval_sec": 0, "slot": "summary"})
+    shard = p._current_shard()
+    p._resolve_tone_slot = lambda cfg, slot, _seen=frozenset(): {
+        "model": "m", "api_key": "k", "base_url": "http://x",
+    }
+    p._post_chat_completion = lambda *a, **k: (
+        '{"capture": true, "kind": "like", "quote": "喜欢下雨天", "confidence": 0.9}'
+    )
+    holder = {"turn": "我最近总在下雨天出门"}
+
+    async def fake_recent_http(method, path, **kwargs):
+        if "/api/memory/recent_file" not in str(path):
+            return None
+        return {"content": [
+            {"type": "human", "data": {"content": holder["turn"]}},
+            {"type": "ai", "data": {"content": "记住啦"}},
+        ]}
+
+    p._emotion_sense._http = fake_recent_http
+
+    # 首趟只建基线（不分析历史）
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert shard.diary == []
+
+    # 新的一轮出现，语气感知先跑——它把 last_turn_marker 推到最新（真机每轮如此）
+    holder["turn"] = "我其实更喜欢晴天"
+    run(p._poll_recent_turns(shard, lanlan="default", advance=True))
+    assert shard.last_turn_marker == shard.last_recent_marker
+
+    # 碎片后跑：仍必须拿到这一轮（旧实现这里恒为 False）
+    shard.last_fragment_analysis_ts = 0.0
+    assert run(p._maybe_capture_fragments("default", shard)) is True
+    assert len(shard.diary) == 1
+    assert shard.diary[0]["quote"] == "喜欢下雨天"
