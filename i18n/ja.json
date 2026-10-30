@@ -684,6 +684,7 @@
   "panel.diary.loadMore": "さらに読み込む",
   "panel.diary.loadingMore": "読み込み中…",
   "panel.diary.selfBadge": "キャラクターの手記",
+  "panel.diary.superseded": "後から更新済み",
   "panel.diary.summary": "全{total}件 · 手記 {self} · 会話の抜粋 {auto}",
   "panel.diary.tabTime": "タイムダイアリー",
   "panel.diary.title": "タイムダイアリー",

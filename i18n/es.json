@@ -684,6 +684,7 @@
   "panel.diary.loadMore": "Cargar más",
   "panel.diary.loadingMore": "Cargando…",
   "panel.diary.selfBadge": "Nota del personaje",
+  "panel.diary.superseded": "Actualizado después",
   "panel.diary.summary": "{total} registros · {self} notas · {auto} fragmentos",
   "panel.diary.tabTime": "Diario del tiempo",
   "panel.diary.title": "Diario del tiempo",

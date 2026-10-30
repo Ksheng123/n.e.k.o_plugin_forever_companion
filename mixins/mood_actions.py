@@ -33,9 +33,9 @@ from ..core.state import (
     _MOOD_ACTION_LABEL_KEYS,
     _PROACTIVE_PAUSE_ACTIONS,
     _TIMED_ACTIONS,
+    _channel_route,
     _LanlanShard,
     _MoodState,
-    _channel_route,
     _now_utc,
 )
 from ..core.stats import record_milestone
@@ -1046,6 +1046,9 @@ class MoodActionsMixin:
         )
         if resolved is None:
             return Err(SdkError("模型通道暂时不可用（槽位没配模型）"))
+        route = _channel_route(slot, resolved)
+        if self._channel_break_open(lanlan, "memory_review", route):
+            return Err(SdkError("记忆自检通道暂时停用，请调整模型配置或重启插件后再试"))
         # ignore_pace=True：这是她**主动**触发的低频动作，与成文同例——300 秒地板防的是
         # 碎片那种自动节拍，不该让她点一下还要干等。日预算照管（那是当天总账）。
         if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
@@ -1059,7 +1062,9 @@ class MoodActionsMixin:
             call_type="plugin_memory_review",
         )
         self._channel_break_note(
-            lanlan, "fragments", _channel_route(slot, resolved), ok=raw is not None
+            # Keep on-demand memory review failures separate from the automatic
+            # fragment capture breaker.
+            lanlan, "memory_review", route, ok=raw is not None
         )
         if raw is None:
             return Err(SdkError("这次没连上模型，稍后再试"))

@@ -702,6 +702,42 @@ def test_tool_check_respects_daily_budget(plugin_factory) -> None:
     assert hasattr(run(p.tool_check_memory()), "error")
 
 
+def test_tool_check_failures_do_not_fuse_fragment_capture(plugin_factory) -> None:
+    p = plugin_factory()
+    shard = _setup_review(p, "")
+    calls = []
+
+    async def failed_chat(*args, **kwargs):
+        calls.append(1)
+        return None
+
+    p._channel_chat = failed_chat
+    for _ in range(3):
+        assert hasattr(run(p.tool_check_memory()), "error")
+    assert len(calls) == 2
+    assert "default|memory_review" in p._channel_break
+    assert "default|fragments" not in p._channel_break
+
+    _setup_capture(p, "")
+    _reset_capture_gates(shard)
+
+    async def capture_chat(*args, **kwargs):
+        return '{"capture": true, "kind": "like", "quote": "喜欢", "confidence": 0.9}'
+
+    p._channel_chat = capture_chat
+    assert run(p._maybe_capture_fragments("default", shard)) is True
+    assert "default|memory_review" in p._channel_break
+
+
+def test_tool_check_success_does_not_clear_fragment_breaker(plugin_factory) -> None:
+    p = plugin_factory()
+    _setup_review(p, '{"findings": []}')
+    entry = {"route": "direct|summary", "fails": 2}
+    p._channel_break["default|fragments"] = dict(entry)
+    assert not hasattr(run(p.tool_check_memory()), "error")
+    assert p._channel_break["default|fragments"] == entry
+
+
 def test_tool_write_journal_returns_tail_without_mirror(plugin_factory) -> None:
     p = plugin_factory()
     first = run(p.tool_write_journal(events="第一篇日记，这几天很开心。"))

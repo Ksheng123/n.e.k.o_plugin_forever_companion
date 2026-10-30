@@ -78,6 +78,7 @@ export type AgentTierUsage = { used?: number; budget?: number }
 export type DiaryItem = {
   ts?: string
   source?: string
+  status?: string
   kind?: string
   mood?: string
   entry?: string

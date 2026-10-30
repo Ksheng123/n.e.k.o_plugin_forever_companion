@@ -684,6 +684,7 @@
   "panel.diary.loadMore": "加载更多",
   "panel.diary.loadingMore": "加载中…",
   "panel.diary.selfBadge": "角色手记",
+  "panel.diary.superseded": "已被更新",
   "panel.diary.summary": "共 {total} 条 · 手记 {self} · 对话片段 {auto}",
   "panel.diary.tabTime": "时光日记",
   "panel.diary.title": "时光日记",

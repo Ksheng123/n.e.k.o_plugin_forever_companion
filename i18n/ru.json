@@ -684,6 +684,7 @@
   "panel.diary.loadMore": "Загрузить ещё",
   "panel.diary.loadingMore": "Загрузка…",
   "panel.diary.selfBadge": "Заметка персонажа",
+  "panel.diary.superseded": "Обновлено позже",
   "panel.diary.summary": "Всего {total} · заметки {self} · фрагменты {auto}",
   "panel.diary.tabTime": "Дневник времени",
   "panel.diary.title": "Дневник времени",

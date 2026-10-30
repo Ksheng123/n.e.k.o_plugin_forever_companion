@@ -254,8 +254,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 "quote": item.get("quote"),
                 "note": item.get("note"),
                 # 生命周期状态（写入后治理）：缺省 active，与 recall_fragments 同口径。
-                # 前端目前不渲染它，但必须透传——_diary_view 是白名单拷贝，不在这里
-                # 列出来的字段到不了面板，将来标"已被更新"时前端才拿得到。
+                # 面板用它区分现行碎片与已被更新的旧记录。
                 "status": str(item.get("status") or "active"),
             }
 

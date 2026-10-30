@@ -684,6 +684,7 @@
   "panel.diary.loadMore": "더 불러오기",
   "panel.diary.loadingMore": "불러오는 중…",
   "panel.diary.selfBadge": "캐릭터 수기",
+  "panel.diary.superseded": "나중에 업데이트됨",
   "panel.diary.summary": "총 {total}건 · 수기 {self} · 대화 발췌 {auto}",
   "panel.diary.tabTime": "타임 다이어리",
   "panel.diary.title": "타임 다이어리",
